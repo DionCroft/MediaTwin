@@ -39,17 +39,32 @@ class VideoFingerprint:
     error: str | None = None
     hash_algorithm: str = "phash"
     hash_size: int = 8
+    decoder_warnings: list[str] = field(default_factory=list)
 
     @property
     def is_usable(self) -> bool:
         return bool(self.frame_hashes) and self.status in {"ok", "partial", "cached"}
+
+    @property
+    def has_decoder_warnings(self) -> bool:
+        return bool(self.decoder_warnings)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "VideoFingerprint":
-        return cls(**data)
+        known_fields = {
+            "path",
+            "frame_hashes",
+            "sampled_positions",
+            "status",
+            "error",
+            "hash_algorithm",
+            "hash_size",
+            "decoder_warnings",
+        }
+        return cls(**{key: value for key, value in data.items() if key in known_fields})
 
 
 @dataclass(slots=True)
@@ -61,6 +76,15 @@ class VideoRecord:
     @property
     def path(self) -> str:
         return self.metadata.path
+
+    @property
+    def needs_attention(self) -> bool:
+        return bool(
+            self.metadata.error
+            or self.fingerprint.error
+            or self.fingerprint.decoder_warnings
+            or self.fingerprint.status == "failed"
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -97,9 +121,22 @@ class DuplicateGroup:
             "similarity_score": round(self.similarity_score, 4),
             "recommended_file_to_keep": self.recommended_keep,
             "candidate_paths": [record.path for record in self.files],
-            "files": [record.metadata.to_dict() for record in self.files],
+            "files": [_record_export_dict(record) for record in self.files],
             "matches": [match.to_dict() for match in self.matches],
         }
+
+
+def _record_export_dict(record: VideoRecord) -> dict[str, Any]:
+    data = record.metadata.to_dict()
+    data.update(
+        {
+            "scan_status": record.fingerprint.status,
+            "fingerprint_error": record.fingerprint.error,
+            "decoder_warnings": list(record.fingerprint.decoder_warnings),
+            "from_cache": record.from_cache,
+        }
+    )
+    return data
 
 
 @dataclass(slots=True)

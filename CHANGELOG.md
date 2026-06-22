@@ -2,6 +2,9 @@
 
 ## 0.2.0 - Desktop Polish
 
+- Added decoder-warning capture so suspect videos are flagged without flooding the terminal.
+- Added a real Windows `.ico` app icon and Windows AppUserModelID setup for better taskbar identity.
+- Expanded GUI exports to full scan reports, including files needing attention.
 - Added a PySide6 desktop GUI with welcome, scanning, results, review, delete confirmation, settings, and about screens.
 - Added responsive background scanning via `QThread`.
 - Added safe Recycle Bin deletion through `send2trash` with a final confirmation screen.
@@ -19,4 +22,3 @@
 - Added SQLite fingerprint caching.
 - Added duplicate matching, grouping, quality recommendation, and JSON/CSV export.
 - Added CLI support and backend tests.
-

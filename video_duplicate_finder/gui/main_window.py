@@ -5,13 +5,22 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QThread
-from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QStackedWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QMainWindow,
+    QMessageBox,
+    QStackedWidget,
+)
 
 from video_duplicate_finder.app_paths import deletion_log_path, settings_file_path
 from video_duplicate_finder.cache import ScanCache
 from video_duplicate_finder.config import ScanConfig
 from video_duplicate_finder.deletion_log import DeletionLogEntry, append_deletion_log
-from video_duplicate_finder.exporter import export_groups_to_csv, export_groups_to_json
+from video_duplicate_finder.exporter import (
+    export_scan_report_to_csv,
+    export_scan_report_to_json,
+)
 from video_duplicate_finder.grouping import recommend_file_to_keep
 from video_duplicate_finder.gui.app_settings import (
     load_app_settings,
@@ -194,10 +203,10 @@ class MainWindow(QMainWindow):
         self.worker_thread = None
 
     def export_csv(self) -> None:
-        self._export("CSV files (*.csv)", "results.csv", export_groups_to_csv)
+        self._export("CSV files (*.csv)", "results.csv", export_scan_report_to_csv)
 
     def export_json(self) -> None:
-        self._export("JSON files (*.json)", "results.json", export_groups_to_json)
+        self._export("JSON files (*.json)", "results.json", export_scan_report_to_json)
 
     def _export(self, file_filter: str, filename: str, export_func) -> None:
         if self.current_result is None:
@@ -216,7 +225,7 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            export_func(self.current_result.duplicate_groups, path)
+            export_func(self.current_result, path)
         except (OSError, ValueError) as exc:
             QMessageBox.critical(
                 self,
@@ -233,6 +242,8 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.review_screen)
 
     def show_delete_confirmation(self, paths: list[str]) -> None:
+        self.review_screen.release_previews()
+        QApplication.processEvents()
         records = self._records_for_paths(paths)
         self.delete_screen.set_files(paths, records)
         self.stack.setCurrentWidget(self.delete_screen)
@@ -250,7 +261,7 @@ class MainWindow(QMainWindow):
 
         moved: list[str] = []
         missing: list[str] = []
-        failed: list[str] = []
+        failed: list[tuple[str, str]] = []
         log_entries: list[DeletionLogEntry] = []
         sizes_by_path = {
             record.path: record.metadata.file_size for record in self._records_for_paths(paths)
@@ -276,7 +287,7 @@ class MainWindow(QMainWindow):
                     )
                 )
             except Exception as exc:
-                failed.append(path_text)
+                failed.append((path_text, str(exc)))
                 log_entries.append(
                     DeletionLogEntry(
                         path=path_text,
@@ -312,7 +323,14 @@ class MainWindow(QMainWindow):
         if missing:
             message += f"\n{len(missing)} missing file(s) were removed from the current results."
         if failed:
-            message += f"\n{len(failed)} file(s) could not be moved."
+            first_path, first_error = failed[0]
+            message += (
+                f"\n{len(failed)} file(s) could not be moved."
+                f"\nFirst failed file: {Path(first_path).name}"
+                f"\nReason: {first_error or 'Unknown error'}"
+            )
+            if "used by another process" in first_error.lower():
+                message += "\nClose any external video players and try again."
         if log_path is not None:
             message += f"\nLog: {log_path}"
         QMessageBox.information(self, "Deletion complete", message)
@@ -438,7 +456,7 @@ class MainWindow(QMainWindow):
             return "No likely duplicates were found with the current settings."
         if result.failed_files:
             return (
-                f"{len(result.failed_files)} unreadable or partially processed "
-                "file(s) were found. They are listed separately in the summary."
+                f"{len(result.failed_files)} file(s) need attention because they were "
+                "unreadable, partially sampled, or decoded with warnings."
             )
         return ""

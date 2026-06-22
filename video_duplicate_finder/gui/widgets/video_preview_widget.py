@@ -79,6 +79,8 @@ class VideoPreviewWidget(QFrame):
         self.current_path = Path(path) if path else None
 
         if not self.current_path or not self.current_path.exists():
+            if self.player is not None:
+                self.player.setSource(QUrl())
             self._set_controls_enabled(False)
             if not MULTIMEDIA_AVAILABLE:
                 self.fallback_label.setText("No readable video selected.")
@@ -93,6 +95,15 @@ class VideoPreviewWidget(QFrame):
 
         self.player.setSource(QUrl.fromLocalFile(str(self.current_path)))
         self._set_controls_enabled(True)
+
+    def clear(self) -> None:
+        self.stop()
+        self.current_path = None
+        if self.player is not None:
+            self.player.setSource(QUrl())
+        self._set_controls_enabled(False)
+        if not MULTIMEDIA_AVAILABLE:
+            self.fallback_label.setText("No readable video selected.")
 
     def play(self) -> None:
         if self.player is not None and self.current_path:
@@ -110,4 +121,3 @@ class VideoPreviewWidget(QFrame):
         self.play_button.setEnabled(enabled)
         self.pause_button.setEnabled(enabled)
         self.stop_button.setEnabled(enabled)
-

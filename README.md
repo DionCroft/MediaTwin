@@ -50,6 +50,8 @@ The GUI lets you choose a folder, include subfolders, adjust advanced thresholds
 
 Deletion is never automatic. Files selected for deletion are shown on a confirmation screen first, and the app uses `send2trash` so files go to the Recycle Bin instead of being permanently deleted.
 
+Videos that decode with FFmpeg/OpenCV warnings are flagged in the results as files needing attention. These files are not assumed to be corrupt, but they are worth reviewing because warnings such as invalid H.264 NAL units can indicate damaged, incomplete, or unusual video streams.
+
 The GUI stores simple settings in a JSON file under your user data folder:
 
 ```text
@@ -175,3 +177,15 @@ dist\Video Duplicate Finder\Video Duplicate Finder.exe
 For a production Windows icon, convert or replace `assets/app_icon_placeholder.svg` with `assets/app_icon.ico`; the build script will use it automatically when present.
 
 If FFmpeg is installed separately, make sure `ffprobe.exe` is available on `PATH` so metadata extraction can use it. OpenCV remains the fallback for basic metadata and frame extraction.
+
+## Performance And Future Improvements
+
+The biggest cost is video decoding and random frame seeking, not perceptual hashing itself. The most useful speed improvements would be:
+
+- Use `ffmpeg`/`ffprobe` more directly for frame extraction, with quieter structured error capture.
+- Add multiprocessing so several videos can be fingerprinted at once.
+- Bucket obvious non-matches before full comparison, such as by duration range and rough resolution.
+- Store lightweight preview thumbnails in the cache for a more visual live scan.
+- Add a scan timeline in the GUI showing current thumbnail, files processed, files needing attention, and duplicate candidates as they appear.
+
+GPU offloading can help if the system has hardware-accelerated decode available through FFmpeg, such as NVDEC, Quick Sync, or AMF. It is less useful for the perceptual hash step because hashing a few sampled frames is already cheap. A good future implementation would make hardware decode optional and fall back to CPU decoding automatically.

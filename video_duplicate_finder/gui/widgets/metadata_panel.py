@@ -29,6 +29,8 @@ class MetadataPanel(QGroupBox):
             ("file_size", "File size"),
             ("codec", "Codec"),
             ("modified", "Modified"),
+            ("scan_status", "Scan status"),
+            ("warnings", "Decoder warnings"),
         ):
             value = QLabel("None selected")
             value.setWordWrap(True)
@@ -51,4 +53,8 @@ class MetadataPanel(QGroupBox):
         self.labels["file_size"].setText(format_file_size(metadata.file_size))
         self.labels["codec"].setText(metadata.codec or "Unknown")
         self.labels["modified"].setText(format_modified_time(metadata.modified_time))
-
+        self.labels["scan_status"].setText(record.fingerprint.status)
+        if record.fingerprint.decoder_warnings:
+            self.labels["warnings"].setText("\n".join(record.fingerprint.decoder_warnings[:4]))
+        else:
+            self.labels["warnings"].setText("None")

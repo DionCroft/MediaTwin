@@ -75,7 +75,7 @@ def run_scan(
     failed_files = [
         record
         for record in records
-        if record.fingerprint.status == "failed" or record.metadata.error
+        if record.needs_attention
     ]
 
     return ScanRunResult(

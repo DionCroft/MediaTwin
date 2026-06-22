@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
@@ -131,8 +133,8 @@ class ResultsScreen(QWidget):
         )
         extra = self.status_message
         if self.result.failed_files:
-            unreadable = f"{len(self.result.failed_files)} unreadable file(s) were found."
-            extra = f"{extra} {unreadable}".strip()
+            issues = f"{len(self.result.failed_files)} file(s) need attention."
+            extra = f"{extra} {issues}".strip()
         self.status_label.setVisible(bool(extra))
         self.status_label.setText(extra)
 
@@ -166,6 +168,9 @@ class ResultsScreen(QWidget):
                 self.cards[group.group_id] = card
                 self.card_layout.addWidget(card)
 
+        if self.result is not None and self.result.failed_files:
+            self.card_layout.addWidget(self._issues_card())
+
         self.card_layout.addStretch(1)
         self.review_button.setEnabled(self.selected_group_id is not None)
 
@@ -196,12 +201,52 @@ class ResultsScreen(QWidget):
             return "The scan was cancelled before duplicate groups were found."
         if self.result.total_files == 0:
             return "No supported videos were found. Try another folder or enable subfolders."
+        if self.result.failed_files and not self.result.duplicate_groups:
+            return (
+                "No duplicate groups were found, but some files need attention. "
+                "Export a report or rescan after checking those videos."
+            )
         if not self.result.duplicate_groups:
             return (
                 "No likely duplicates were found. You can try a lower similarity threshold "
                 "if you expected near-duplicates."
             )
         return "No duplicate groups match the current filter."
+
+    def _issues_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("warningPanel")
+        layout = QVBoxLayout(card)
+        title = QLabel("Files Needing Attention")
+        title.setObjectName("sectionTitle")
+        intro = QLabel(
+            "These files opened with decoder warnings, only produced partial samples, "
+            "or could not be fingerprinted. They may be corrupt, incomplete, or just "
+            "encoded in an unusual way."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(title)
+        layout.addWidget(intro)
+
+        if self.result is None:
+            return card
+
+        for record in self.result.failed_files[:12]:
+            warning = record.metadata.error or record.fingerprint.error or "Decoder warning"
+            if record.fingerprint.decoder_warnings:
+                warning = record.fingerprint.decoder_warnings[0]
+            label = QLabel(f"{Path(record.path).name}\n{warning}")
+            label.setWordWrap(True)
+            label.setObjectName("mutedLabel")
+            layout.addWidget(label)
+
+        remaining = len(self.result.failed_files) - 12
+        if remaining > 0:
+            more = QLabel(f"...and {remaining} more. Export a report for the full list.")
+            more.setObjectName("mutedLabel")
+            layout.addWidget(more)
+
+        return card
 
     def _select_group(self, group_id: str) -> None:
         self.selected_group_id = group_id

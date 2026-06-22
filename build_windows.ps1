@@ -36,4 +36,3 @@ Write-Host "Building Video Duplicate Finder..."
 
 Write-Host ""
 Write-Host "Build complete: dist\Video Duplicate Finder\Video Duplicate Finder.exe"
-
