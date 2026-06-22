@@ -94,3 +94,6 @@ class DeleteConfirmationScreen(QWidget):
 
     def _update_confirm_enabled(self, *args) -> None:
         self.confirm_button.setEnabled(bool(self.paths) and self.safety_checkbox.isChecked())
+
+    def set_back_button_text(self, text: str) -> None:
+        self.cancel_button.setText(text)

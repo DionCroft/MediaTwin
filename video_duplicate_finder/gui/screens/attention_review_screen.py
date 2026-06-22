@@ -1,4 +1,4 @@
-"""Duplicate group review screen."""
+"""Review screen for files that need manual attention."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QCheckBox,
-    QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -28,62 +28,63 @@ from video_duplicate_finder.gui.formatting import (
     format_resolution,
 )
 from video_duplicate_finder.gui.widgets.metadata_panel import MetadataPanel
-from video_duplicate_finder.gui.widgets.video_preview_widget import VideoPreviewWidget
-from video_duplicate_finder.models import DuplicateGroup, VideoRecord
+from video_duplicate_finder.gui.widgets.video_thumbnail import load_video_thumbnail
+from video_duplicate_finder.models import VideoRecord
 
 
-class ReviewScreen(QWidget):
+class AttentionReviewScreen(QWidget):
     back_requested = Signal()
     delete_requested = Signal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.group: DuplicateGroup | None = None
-
-        self.title = QLabel("Review Duplicate Group")
-        self.title.setObjectName("heroTitle")
-        self.subtitle = QLabel("Select files carefully. Deletion is always reviewed first.")
-        self.subtitle.setObjectName("mutedLabel")
-
-        self.left_combo = QComboBox()
-        self.right_combo = QComboBox()
-        self.left_preview = VideoPreviewWidget("Left Preview")
-        self.right_preview = VideoPreviewWidget("Right Preview")
-        self.left_combo.currentIndexChanged.connect(self._update_previews)
-        self.right_combo.currentIndexChanged.connect(self._update_previews)
+        self.records: list[VideoRecord] = []
         self._updating_checks = False
 
-        preview_selector_row = QHBoxLayout()
-        preview_selector_row.addWidget(QLabel("Left"))
-        preview_selector_row.addWidget(self.left_combo, 1)
-        preview_selector_row.addWidget(QLabel("Right"))
-        preview_selector_row.addWidget(self.right_combo, 1)
+        self.title = QLabel("Review Files Needing Attention")
+        self.title.setObjectName("heroTitle")
+        self.subtitle = QLabel(
+            "These files decoded with warnings or could not be fully fingerprinted."
+        )
+        self.subtitle.setObjectName("mutedLabel")
+        self.subtitle.setWordWrap(True)
+
+        self.thumbnail_frame = QFrame()
+        self.thumbnail_frame.setObjectName("thumbnailFrame")
+        thumbnail_layout = QVBoxLayout(self.thumbnail_frame)
+        thumbnail_layout.setContentsMargins(14, 14, 14, 14)
+        self.thumbnail_label = QLabel("Select a file to load a thumbnail.")
+        self.thumbnail_label.setObjectName("thumbnailLabel")
+        self.thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumbnail_label.setMinimumSize(420, 236)
+        self.thumbnail_label.setWordWrap(True)
+        thumbnail_layout.addWidget(self.thumbnail_label)
+
+        self.metadata_panel = MetadataPanel("Selected File")
 
         preview_row = QHBoxLayout()
-        preview_row.addWidget(self.left_preview, 1)
-        preview_row.addWidget(self.right_preview, 1)
+        preview_row.addWidget(self.thumbnail_frame, 1)
+        preview_row.addWidget(self.metadata_panel, 2)
 
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
             [
                 "Move to Recycle Bin",
-                "Keep",
                 "Filename",
                 "Size",
                 "Duration",
                 "Resolution",
                 "Modified",
+                "Issue",
             ]
         )
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setDefaultSectionSize(44)
-        self.table.itemSelectionChanged.connect(self._update_metadata_selection)
-        self.table.itemChanged.connect(self._on_item_changed)
+        self.table.itemSelectionChanged.connect(self._update_selection)
         self.table.cellDoubleClicked.connect(self._toggle_row_delete_selection)
 
-        self.metadata_panel = MetadataPanel("Selected File")
         self.selection_summary_label = QLabel("No files selected for Recycle Bin.")
         self.selection_summary_label.setObjectName("statusLabel")
         self.selection_summary_label.setWordWrap(True)
@@ -91,9 +92,7 @@ class ReviewScreen(QWidget):
         self.open_file_button = QPushButton("Open File")
         self.open_folder_button = QPushButton("Open Containing Folder")
         self.copy_path_button = QPushButton("Copy Path")
-        self.mark_selected_button = QPushButton("Mark Selected")
-        self.unmark_selected_button = QPushButton("Unmark Selected")
-        self.mark_except_keep_button = QPushButton("Mark All Except Recommended")
+        self.select_all_button = QPushButton("Select All Attention Files")
         self.clear_selection_button = QPushButton("Clear Selection")
         self.delete_button = QPushButton("Review Files To Delete")
         self.delete_button.setObjectName("dangerButton")
@@ -103,10 +102,8 @@ class ReviewScreen(QWidget):
         self.open_file_button.clicked.connect(self._open_file)
         self.open_folder_button.clicked.connect(self._open_folder)
         self.copy_path_button.clicked.connect(self._copy_path)
-        self.mark_selected_button.clicked.connect(self._mark_selected_row)
-        self.unmark_selected_button.clicked.connect(self._unmark_selected_row)
-        self.mark_except_keep_button.clicked.connect(self._mark_all_except_recommended)
-        self.clear_selection_button.clicked.connect(self._clear_delete_selection)
+        self.select_all_button.clicked.connect(self._select_all)
+        self.clear_selection_button.clicked.connect(self._clear_selection)
         self.delete_button.clicked.connect(self._request_delete)
         self.back_button.clicked.connect(self.back_requested.emit)
 
@@ -115,9 +112,7 @@ class ReviewScreen(QWidget):
         action_row.addWidget(self.open_folder_button)
         action_row.addWidget(self.copy_path_button)
         action_row.addStretch(1)
-        action_row.addWidget(self.mark_selected_button)
-        action_row.addWidget(self.unmark_selected_button)
-        action_row.addWidget(self.mark_except_keep_button)
+        action_row.addWidget(self.select_all_button)
         action_row.addWidget(self.clear_selection_button)
         action_row.addWidget(self.delete_button)
         action_row.addWidget(self.back_button)
@@ -127,119 +122,106 @@ class ReviewScreen(QWidget):
         layout.setSpacing(14)
         layout.addWidget(self.title)
         layout.addWidget(self.subtitle)
-        layout.addLayout(preview_selector_row)
-        layout.addLayout(preview_row, 2)
+        layout.addLayout(preview_row, 1)
         layout.addWidget(self.table, 2)
         layout.addWidget(self.selection_summary_label)
-        layout.addWidget(self.metadata_panel)
         layout.addLayout(action_row)
 
-    def set_group(self, group: DuplicateGroup) -> None:
-        self.group = group
-        self.title.setText(group.group_id.replace("-", " ").title())
+    def set_records(self, records: list[VideoRecord]) -> None:
+        self.records = list(records)
+        self.title.setText("Review Files Needing Attention")
         self.subtitle.setText(
-            f"{len(group.files)} files. Recommended keep: {Path(group.recommended_keep).name}"
+            f"{len(self.records)} file(s) decoded with warnings, produced partial samples, "
+            "or could not be fingerprinted."
         )
-        self._populate_preview_combos()
         self._populate_table()
-        self.metadata_panel.set_record(group.files[0] if group.files else None)
-
-    def _populate_preview_combos(self) -> None:
-        self.left_combo.blockSignals(True)
-        self.right_combo.blockSignals(True)
-        self.left_combo.clear()
-        self.right_combo.clear()
-
-        if self.group is not None:
-            for record in self.group.files:
-                self.left_combo.addItem(record.metadata.filename, record.path)
-                self.right_combo.addItem(record.metadata.filename, record.path)
-            if len(self.group.files) > 1:
-                self.right_combo.setCurrentIndex(1)
-
-        self.left_combo.blockSignals(False)
-        self.right_combo.blockSignals(False)
-        self._update_previews()
+        self._update_summary()
 
     def _populate_table(self) -> None:
-        self.table.blockSignals(True)
         self.table.setRowCount(0)
-        if self.group is None:
-            self.table.blockSignals(False)
-            self._update_delete_summary()
-            return
+        self.table.setRowCount(len(self.records))
 
-        self.table.setRowCount(len(self.group.files))
-        for row, record in enumerate(self.group.files):
+        for row, record in enumerate(self.records):
             metadata = record.metadata
-            delete_checkbox = QCheckBox("Move")
-            delete_checkbox.setProperty("path", record.path)
-            delete_checkbox.setToolTip(
+            checkbox = QCheckBox("Move")
+            checkbox.setProperty("path", record.path)
+            checkbox.setToolTip(
                 "Tick to move this file to the Recycle Bin after confirmation."
             )
-            delete_checkbox.stateChanged.connect(self._on_delete_checkbox_changed)
+            checkbox.stateChanged.connect(self._on_delete_checkbox_changed)
 
-            keep_item = QTableWidgetItem(
-                "Recommended" if record.path == self.group.recommended_keep else ""
-            )
-            keep_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             filename_item = QTableWidgetItem(metadata.filename)
             filename_item.setData(Qt.ItemDataRole.UserRole, record.path)
             filename_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
 
-            self.table.setCellWidget(row, 0, delete_checkbox)
-            self.table.setItem(row, 1, keep_item)
-            self.table.setItem(row, 2, filename_item)
-            self.table.setItem(row, 3, _read_only_item(format_file_size(metadata.file_size)))
-            self.table.setItem(row, 4, _read_only_item(format_duration(metadata.duration)))
+            self.table.setCellWidget(row, 0, checkbox)
+            self.table.setItem(row, 1, filename_item)
+            self.table.setItem(row, 2, _read_only_item(format_file_size(metadata.file_size)))
+            self.table.setItem(row, 3, _read_only_item(format_duration(metadata.duration)))
             self.table.setItem(
                 row,
-                5,
+                4,
                 _read_only_item(format_resolution(metadata.width, metadata.height)),
             )
             self.table.setItem(
                 row,
-                6,
+                5,
                 _read_only_item(format_modified_time(metadata.modified_time)),
             )
+            self.table.setItem(row, 6, _read_only_item(_attention_reason(record)))
 
         self.table.resizeColumnsToContents()
         self.table.setColumnWidth(0, 165)
-        self.table.blockSignals(False)
-        if self.group.files:
+        self.table.setColumnWidth(6, 380)
+        if self.records:
             self.table.selectRow(0)
-        self._update_delete_summary()
+        else:
+            self.metadata_panel.set_record(None)
+            self._set_thumbnail_placeholder("No attention files to review.")
 
-    def _update_previews(self) -> None:
-        self.left_preview.set_video(self.left_combo.currentData())
-        self.right_preview.set_video(self.right_combo.currentData())
+    def _update_selection(self) -> None:
+        record = self._selected_record()
+        self.metadata_panel.set_record(record)
+        self._load_thumbnail(record)
 
-    def release_previews(self) -> None:
-        self.left_preview.clear()
-        self.right_preview.clear()
+    def _load_thumbnail(self, record: VideoRecord | None) -> None:
+        if record is None:
+            self._set_thumbnail_placeholder("Select a file to load a thumbnail.")
+            return
 
-    def _update_metadata_selection(self) -> None:
-        self.metadata_panel.set_record(self._selected_record())
+        pixmap = load_video_thumbnail(record.path)
+        if pixmap is None:
+            self._set_thumbnail_placeholder(
+                "No thumbnail could be read.\nUse Open File to inspect this video."
+            )
+            return
+
+        self.thumbnail_label.setPixmap(pixmap)
+        self.thumbnail_label.setText("")
+
+    def _set_thumbnail_placeholder(self, text: str) -> None:
+        self.thumbnail_label.clear()
+        self.thumbnail_label.setText(text)
 
     def _selected_record(self) -> VideoRecord | None:
-        if self.group is None:
-            return None
         selected_rows = self.table.selectionModel().selectedRows()
         if not selected_rows:
             return None
         row = selected_rows[0].row()
-        item = self.table.item(row, 2)
+        item = self.table.item(row, 1)
         if item is None:
             return None
         return self._record_for_path(item.data(Qt.ItemDataRole.UserRole))
 
     def _record_for_path(self, path: str) -> VideoRecord | None:
-        if self.group is None:
-            return None
-        for record in self.group.files:
+        for record in self.records:
             if record.path == path:
                 return record
         return None
+
+    def _delete_checkbox(self, row: int) -> QCheckBox | None:
+        widget = self.table.cellWidget(row, 0)
+        return widget if isinstance(widget, QCheckBox) else None
 
     def _checked_delete_paths(self) -> list[str]:
         paths: list[str] = []
@@ -256,70 +238,35 @@ class ReviewScreen(QWidget):
             if (record := self._record_for_path(path)) is not None
         ]
 
-    def _selected_row(self) -> int | None:
-        selected_rows = self.table.selectionModel().selectedRows()
-        if not selected_rows:
-            return None
-        return selected_rows[0].row()
-
     def _set_row_checked(self, row: int, checked: bool) -> None:
         checkbox = self._delete_checkbox(row)
-        if checkbox is None:
-            return
-        checkbox.setChecked(checked)
+        if checkbox is not None:
+            checkbox.setChecked(checked)
 
     def _toggle_row_delete_selection(self, row: int, column: int) -> None:
         checkbox = self._delete_checkbox(row)
-        if checkbox is None:
-            return
-        self._set_row_checked(row, not checkbox.isChecked())
+        if checkbox is not None:
+            self._set_row_checked(row, not checkbox.isChecked())
 
-    def _mark_selected_row(self) -> None:
-        row = self._selected_row()
-        if row is not None:
+    def _select_all(self) -> None:
+        self._updating_checks = True
+        for row in range(self.table.rowCount()):
             self._set_row_checked(row, True)
+        self._updating_checks = False
+        self._update_summary()
 
-    def _unmark_selected_row(self) -> None:
-        row = self._selected_row()
-        if row is not None:
+    def _clear_selection(self) -> None:
+        self._updating_checks = True
+        for row in range(self.table.rowCount()):
             self._set_row_checked(row, False)
-
-    def _mark_all_except_recommended(self) -> None:
-        if self.group is None:
-            return
-        self._updating_checks = True
-        for row in range(self.table.rowCount()):
-            checkbox = self._delete_checkbox(row)
-            if checkbox is None:
-                continue
-            path = str(checkbox.property("path"))
-            checkbox.setChecked(path != self.group.recommended_keep)
         self._updating_checks = False
-        self._update_delete_summary()
-
-    def _clear_delete_selection(self) -> None:
-        self._updating_checks = True
-        for row in range(self.table.rowCount()):
-            checkbox = self._delete_checkbox(row)
-            if checkbox is not None:
-                checkbox.setChecked(False)
-        self._updating_checks = False
-        self._update_delete_summary()
-
-    def _on_item_changed(self, item: QTableWidgetItem) -> None:
-        if self._updating_checks or item.column() != 0:
-            return
-        self._update_delete_summary()
+        self._update_summary()
 
     def _on_delete_checkbox_changed(self, *args) -> None:
         if not self._updating_checks:
-            self._update_delete_summary()
+            self._update_summary()
 
-    def _delete_checkbox(self, row: int) -> QCheckBox | None:
-        widget = self.table.cellWidget(row, 0)
-        return widget if isinstance(widget, QCheckBox) else None
-
-    def _update_delete_summary(self) -> None:
+    def _update_summary(self) -> None:
         records = self._checked_delete_records()
         total_size = sum(record.metadata.file_size for record in records)
         selected_count = len(records)
@@ -329,18 +276,9 @@ class ReviewScreen(QWidget):
             self.selection_summary_label.setText("No files selected for Recycle Bin.")
             return
 
-        recommended_selected = (
-            self.group is not None
-            and any(record.path == self.group.recommended_keep for record in records)
-        )
-        warning = (
-            " The recommended file is selected."
-            if recommended_selected
-            else " Recommended file will be kept."
-        )
         self.selection_summary_label.setText(
-            f"{selected_count} file(s) selected for Recycle Bin, "
-            f"{format_file_size(total_size)} total.{warning}"
+            f"{selected_count} attention file(s) selected for Recycle Bin, "
+            f"{format_file_size(total_size)} total."
         )
 
     def _request_delete(self) -> None:
@@ -349,7 +287,7 @@ class ReviewScreen(QWidget):
             QMessageBox.information(
                 self,
                 "No files selected",
-                "Select a row and use Mark Selected, or use Mark All Except Recommended.",
+                "Select individual files or use Select All Attention Files.",
             )
             return
         self.delete_requested.emit(paths)
@@ -379,6 +317,20 @@ class ReviewScreen(QWidget):
         record = self._selected_record()
         if record is not None:
             QApplication.clipboard().setText(record.path)
+
+
+def _attention_reason(record: VideoRecord) -> str:
+    if record.metadata.error:
+        return record.metadata.error
+    if record.fingerprint.decoder_warnings:
+        return record.fingerprint.decoder_warnings[0]
+    if record.fingerprint.error:
+        return record.fingerprint.error
+    if record.fingerprint.status == "failed":
+        return "Fingerprinting failed."
+    if record.fingerprint.status == "partial":
+        return "Only partial frame samples were produced."
+    return "Decoder warning or partial scan."
 
 
 def _read_only_item(text: str) -> QTableWidgetItem:

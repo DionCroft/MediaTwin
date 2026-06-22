@@ -14,6 +14,15 @@ def test_gui_entrypoint_module_is_discoverable() -> None:
     assert importlib.util.find_spec("video_duplicate_finder.gui.app") is not None
 
 
+def test_attention_review_screen_module_is_discoverable() -> None:
+    assert (
+        importlib.util.find_spec(
+            "video_duplicate_finder.gui.screens.attention_review_screen"
+        )
+        is not None
+    )
+
+
 def test_gui_formatting_helpers_are_stable() -> None:
     assert format_file_size(1024 * 1024) == "1.0 MB"
     assert format_duration(65) == "1:05"

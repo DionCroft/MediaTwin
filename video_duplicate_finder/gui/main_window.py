@@ -28,6 +28,9 @@ from video_duplicate_finder.gui.app_settings import (
     settings_from_dict,
 )
 from video_duplicate_finder.gui.screens.about_screen import AboutScreen
+from video_duplicate_finder.gui.screens.attention_review_screen import (
+    AttentionReviewScreen,
+)
 from video_duplicate_finder.gui.screens.delete_confirmation_screen import (
     DeleteConfirmationScreen,
 )
@@ -52,6 +55,7 @@ class MainWindow(QMainWindow):
         self.current_group: DuplicateGroup | None = None
         self.worker_thread: QThread | None = None
         self.scan_worker: ScanWorker | None = None
+        self._delete_return_widget = None
 
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
@@ -60,6 +64,7 @@ class MainWindow(QMainWindow):
         self.scanning_screen = ScanningScreen()
         self.results_screen = ResultsScreen()
         self.review_screen = ReviewScreen()
+        self.attention_review_screen = AttentionReviewScreen()
         self.delete_screen = DeleteConfirmationScreen()
         self.settings_screen = SettingsScreen()
         self.about_screen = AboutScreen()
@@ -69,6 +74,7 @@ class MainWindow(QMainWindow):
             self.scanning_screen,
             self.results_screen,
             self.review_screen,
+            self.attention_review_screen,
             self.delete_screen,
             self.settings_screen,
             self.about_screen,
@@ -88,6 +94,12 @@ class MainWindow(QMainWindow):
         self.scanning_screen.cancel_requested.connect(self.cancel_scan)
 
         self.results_screen.review_group_requested.connect(self.show_review)
+        self.results_screen.review_all_duplicates_requested.connect(
+            self.show_delete_confirmation
+        )
+        self.results_screen.review_attention_requested.connect(
+            self.show_attention_review
+        )
         self.results_screen.export_csv_requested.connect(self.export_csv)
         self.results_screen.export_json_requested.connect(self.export_json)
         self.results_screen.scan_again_requested.connect(
@@ -100,8 +112,13 @@ class MainWindow(QMainWindow):
         )
         self.review_screen.delete_requested.connect(self.show_delete_confirmation)
 
+        self.attention_review_screen.back_requested.connect(
+            lambda: self.stack.setCurrentWidget(self.results_screen)
+        )
+        self.attention_review_screen.delete_requested.connect(self.show_delete_confirmation)
+
         self.delete_screen.cancelled.connect(
-            lambda: self.stack.setCurrentWidget(self.review_screen)
+            self._return_from_delete_confirmation
         )
         self.delete_screen.confirmed.connect(self.move_files_to_recycle_bin)
 
@@ -241,12 +258,29 @@ class MainWindow(QMainWindow):
         self.review_screen.set_group(group)
         self.stack.setCurrentWidget(self.review_screen)
 
+    def show_attention_review(self, records: list[VideoRecord]) -> None:
+        self.attention_review_screen.set_records(records)
+        self.stack.setCurrentWidget(self.attention_review_screen)
+
     def show_delete_confirmation(self, paths: list[str]) -> None:
+        self._delete_return_widget = self.stack.currentWidget()
         self.review_screen.release_previews()
         QApplication.processEvents()
         records = self._records_for_paths(paths)
         self.delete_screen.set_files(paths, records)
+        if self._delete_return_widget is self.results_screen:
+            self.delete_screen.set_back_button_text("Back To Results")
+        elif self._delete_return_widget is self.attention_review_screen:
+            self.delete_screen.set_back_button_text("Back To Attention Review")
+        else:
+            self.delete_screen.set_back_button_text("Back To Review")
         self.stack.setCurrentWidget(self.delete_screen)
+
+    def _return_from_delete_confirmation(self) -> None:
+        if self._delete_return_widget is not None:
+            self.stack.setCurrentWidget(self._delete_return_widget)
+            return
+        self.stack.setCurrentWidget(self.results_screen)
 
     def move_files_to_recycle_bin(self, paths: list[str]) -> None:
         try:
@@ -412,7 +446,15 @@ class MainWindow(QMainWindow):
         if self.current_result is None:
             return []
         wanted = set(paths)
-        return [record for record in self.current_result.records if record.path in wanted]
+        records_by_path: dict[str, VideoRecord] = {}
+        for record in self.current_result.records:
+            records_by_path[record.path] = record
+        for record in self.current_result.failed_files:
+            records_by_path.setdefault(record.path, record)
+        for group in self.current_result.duplicate_groups:
+            for record in group.files:
+                records_by_path.setdefault(record.path, record)
+        return [records_by_path[path] for path in paths if path in records_by_path]
 
     def _remove_paths_from_results(self, paths: list[str]) -> None:
         if self.current_result is None:

@@ -59,6 +59,17 @@ QLabel#metricValue {
     font-weight: 650;
     color: #111827;
 }
+QFrame#thumbnailFrame {
+    background: #ffffff;
+    border: 1px solid #d9dee8;
+    border-radius: 8px;
+}
+QLabel#thumbnailLabel {
+    background: #eef1f6;
+    border: 1px solid #d9dee8;
+    border-radius: 6px;
+    color: #5f6c7b;
+}
 QPushButton {
     background: #ffffff;
     border: 1px solid #cfd7e6;
@@ -89,6 +100,24 @@ QPushButton#dangerButton {
 }
 QPushButton#dangerButton:hover {
     background: #b91c1c;
+}
+QCheckBox {
+    spacing: 10px;
+    padding: 8px 4px;
+}
+QCheckBox::indicator {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #64748b;
+    border-radius: 4px;
+    background: #ffffff;
+}
+QCheckBox::indicator:hover {
+    border-color: #2563eb;
+}
+QCheckBox::indicator:checked {
+    background: #2563eb;
+    border-color: #1d4ed8;
 }
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTableWidget, QListWidget {
     background: #ffffff;
@@ -181,6 +210,17 @@ QLabel#metricValue {
     font-weight: 650;
     color: #ffffff;
 }
+QFrame#thumbnailFrame {
+    background: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 8px;
+}
+QLabel#thumbnailLabel {
+    background: #111827;
+    border: 1px solid #374151;
+    border-radius: 6px;
+    color: #9ca3af;
+}
 QPushButton {
     background: #1f2937;
     border: 1px solid #4b5563;
@@ -211,6 +251,24 @@ QPushButton#dangerButton {
 }
 QPushButton#dangerButton:hover {
     background: #b91c1c;
+}
+QCheckBox {
+    spacing: 10px;
+    padding: 8px 4px;
+}
+QCheckBox::indicator {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #94a3b8;
+    border-radius: 4px;
+    background: #111827;
+}
+QCheckBox::indicator:hover {
+    border-color: #60a5fa;
+}
+QCheckBox::indicator:checked {
+    background: #60a5fa;
+    border-color: #93c5fd;
 }
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTableWidget, QListWidget {
     background: #1f2937;

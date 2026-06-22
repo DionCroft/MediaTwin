@@ -23,6 +23,8 @@ from video_duplicate_finder.models import DuplicateGroup, ScanRunResult
 
 class ResultsScreen(QWidget):
     review_group_requested = Signal(object)
+    review_all_duplicates_requested = Signal(object)
+    review_attention_requested = Signal(object)
     export_csv_requested = Signal()
     export_json_requested = Signal()
     scan_again_requested = Signal()
@@ -71,6 +73,9 @@ class ResultsScreen(QWidget):
 
         self.export_csv_button = QPushButton("Export CSV")
         self.export_json_button = QPushButton("Export JSON")
+        self.review_all_button = QPushButton("Review All Duplicate Copies")
+        self.review_all_button.setObjectName("dangerButton")
+        self.review_all_button.setEnabled(False)
         self.review_button = QPushButton("Review Selected Group")
         self.review_button.setObjectName("primaryButton")
         self.review_button.setEnabled(False)
@@ -79,6 +84,7 @@ class ResultsScreen(QWidget):
 
         self.export_csv_button.clicked.connect(self.export_csv_requested.emit)
         self.export_json_button.clicked.connect(self.export_json_requested.emit)
+        self.review_all_button.clicked.connect(self._emit_review_all_duplicates)
         self.review_button.clicked.connect(self._emit_review)
         self.scan_again_button.clicked.connect(self.scan_again_requested.emit)
         self.settings_button.clicked.connect(self.settings_requested.emit)
@@ -89,6 +95,7 @@ class ResultsScreen(QWidget):
         action_row.addStretch(1)
         action_row.addWidget(self.scan_again_button)
         action_row.addWidget(self.settings_button)
+        action_row.addWidget(self.review_all_button)
         action_row.addWidget(self.review_button)
 
         self.card_container = QWidget()
@@ -116,6 +123,7 @@ class ResultsScreen(QWidget):
         self.selected_group_id = None
         self._update_summary()
         self._refresh_cards()
+        self.review_all_button.setEnabled(bool(self._all_non_recommended_paths()))
 
     def _update_summary(self) -> None:
         if self.result is None:
@@ -219,17 +227,29 @@ class ResultsScreen(QWidget):
         layout = QVBoxLayout(card)
         title = QLabel("Files Needing Attention")
         title.setObjectName("sectionTitle")
+
+        if self.result is None:
+            layout.addWidget(title)
+            return card
+
         intro = QLabel(
             "These files opened with decoder warnings, only produced partial samples, "
             "or could not be fingerprinted. They may be corrupt, incomplete, or just "
-            "encoded in an unusual way."
+            "encoded in an unusual way. Review them with thumbnails before deciding "
+            "whether to move anything to the Recycle Bin."
         )
         intro.setWordWrap(True)
+        total_size = sum(record.metadata.file_size for record in self.result.failed_files)
+        summary = QLabel(
+            f"{len(self.result.failed_files)} file(s), {format_file_size(total_size)} total."
+        )
+        summary.setObjectName("metricValue")
+        review_button = QPushButton("Review Files Needing Attention")
+        review_button.setObjectName("primaryButton")
+        review_button.clicked.connect(self._emit_attention_review)
         layout.addWidget(title)
         layout.addWidget(intro)
-
-        if self.result is None:
-            return card
+        layout.addWidget(summary)
 
         for record in self.result.failed_files[:12]:
             warning = record.metadata.error or record.fingerprint.error or "Decoder warning"
@@ -246,6 +266,11 @@ class ResultsScreen(QWidget):
             more.setObjectName("mutedLabel")
             layout.addWidget(more)
 
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        button_row.addWidget(review_button)
+        layout.addLayout(button_row)
+
         return card
 
     def _select_group(self, group_id: str) -> None:
@@ -261,3 +286,29 @@ class ResultsScreen(QWidget):
             if group.group_id == self.selected_group_id:
                 self.review_group_requested.emit(group)
                 return
+
+    def _emit_review_all_duplicates(self) -> None:
+        paths = self._all_non_recommended_paths()
+        if paths:
+            self.review_all_duplicates_requested.emit(paths)
+
+    def _emit_attention_review(self) -> None:
+        if self.result is not None and self.result.failed_files:
+            self.review_attention_requested.emit(list(self.result.failed_files))
+
+    def _all_non_recommended_paths(self) -> list[str]:
+        if self.result is None:
+            return []
+
+        paths: list[str] = []
+        seen: set[str] = set()
+        recommended_paths = {
+            group.recommended_keep for group in self.result.duplicate_groups
+        }
+        for group in self.result.duplicate_groups:
+            for record in group.files:
+                if record.path in recommended_paths or record.path in seen:
+                    continue
+                paths.append(record.path)
+                seen.add(record.path)
+        return paths

@@ -50,7 +50,11 @@ The GUI lets you choose a folder, include subfolders, adjust advanced thresholds
 
 Deletion is never automatic. Files selected for deletion are shown on a confirmation screen first, and the app uses `send2trash` so files go to the Recycle Bin instead of being permanently deleted.
 
+For faster cleanup, use **Review All Duplicate Copies** on the Results screen. It selects every non-recommended file across all duplicate groups and still requires final Recycle Bin confirmation before anything is moved.
+
 Videos that decode with FFmpeg/OpenCV warnings are flagged in the results as files needing attention. These files are not assumed to be corrupt, but they are worth reviewing because warnings such as invalid H.264 NAL units can indicate damaged, incomplete, or unusual video streams.
+
+Use **Review Files Needing Attention** to inspect those files with a thumbnail, metadata, path actions, and selection controls. Selected attention files still go through the same final Recycle Bin confirmation before anything is moved.
 
 The GUI stores simple settings in a JSON file under your user data folder:
 

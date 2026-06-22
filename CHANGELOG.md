@@ -2,6 +2,9 @@
 
 ## 0.2.0 - Desktop Polish
 
+- Added a results-level "Review All Duplicate Copies" action for fast bulk review of every non-recommended duplicate file.
+- Added a dedicated attention-file review screen with thumbnails, metadata, selection controls, and safe Recycle Bin deletion.
+- Improved delete confirmation checkbox visibility and made the confirmation Back button return to the correct screen.
 - Added decoder-warning capture so suspect videos are flagged without flooding the terminal.
 - Added a real Windows `.ico` app icon and Windows AppUserModelID setup for better taskbar identity.
 - Expanded GUI exports to full scan reports, including files needing attention.
