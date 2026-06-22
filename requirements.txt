@@ -1,0 +1,9 @@
+opencv-python>=4.9
+ImageHash>=4.3
+Pillow>=10.0
+PySide6>=6.7
+send2trash>=1.8
+rich>=13.7
+tqdm>=4.66
+pytest>=8.0
+pyinstaller>=6.5
