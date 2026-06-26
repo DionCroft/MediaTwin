@@ -36,7 +36,7 @@ def _set_windows_app_user_model_id() -> None:
 def main() -> int:
     _set_windows_app_user_model_id()
     app = QApplication(sys.argv)
-    app.setApplicationName("Video Duplicate Finder")
+    app.setApplicationName("Media Duplicate Finder")
     app.setOrganizationName("VideoDuplicateFinder")
 
     icon_path = _resource_path("assets/app_icon.ico")

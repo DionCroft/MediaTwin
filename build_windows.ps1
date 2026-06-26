@@ -25,14 +25,14 @@ if (Test-Path $IconPath) {
     $IconArgs = @("--icon", $IconPath)
 }
 
-Write-Host "Building Video Duplicate Finder..."
+Write-Host "Building Media Duplicate Finder..."
 & $VenvPython -m PyInstaller `
     --noconfirm `
     --windowed `
-    --name "Video Duplicate Finder" `
+    --name "Media Duplicate Finder" `
     --add-data "assets;assets" `
     @IconArgs `
     "video_duplicate_finder\gui\app.py"
 
 Write-Host ""
-Write-Host "Build complete: dist\Video Duplicate Finder\Video Duplicate Finder.exe"
+Write-Host "Build complete: dist\Media Duplicate Finder\Media Duplicate Finder.exe"

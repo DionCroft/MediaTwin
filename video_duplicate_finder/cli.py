@@ -1,4 +1,4 @@
-"""Command-line interface for Video Duplicate Finder."""
+"""Command-line interface for Media Duplicate Finder."""
 
 from __future__ import annotations
 
@@ -35,13 +35,13 @@ def main(argv: list[str] | None = None) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="Video Duplicate Finder",
-        description="Find likely duplicate videos using perceptual frame hashes.",
+        prog="Media Duplicate Finder",
+        description="Find likely duplicate videos, images, and GIFs using perceptual hashes.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    scan_parser = subparsers.add_parser("scan", help="Scan a folder for duplicate videos.")
-    scan_parser.add_argument("folder", type=Path, help="Folder containing videos to scan.")
+    scan_parser = subparsers.add_parser("scan", help="Scan a folder for duplicate media files.")
+    scan_parser.add_argument("folder", type=Path, help="Folder containing media files to scan.")
     scan_parser.add_argument(
         "--recursive",
         action="store_true",
@@ -116,7 +116,7 @@ def _handle_scan(args: argparse.Namespace) -> int:
             TaskProgressColumn(),
             console=console,
         ) as progress:
-            task_id = progress.add_task("Scanning videos", total=1)
+            task_id = progress.add_task("Scanning media", total=1)
 
             def on_progress(current: int, total: int, path: Path) -> None:
                 progress.update(
@@ -143,7 +143,7 @@ def _plain_progress(current: int, total: int, path: Path) -> None:
 
 def _print_summary(result, json_path: Path | None, csv_path: Path | None, console) -> None:
     lines = [
-        f"Scanned: {result.total_files} video(s)",
+        f"Scanned: {result.total_files} media file(s)",
         f"Cache hits: {result.cache_hits}",
         f"Duplicate groups: {len(result.duplicate_groups)}",
         f"Failed files: {len(result.failed_files)}",
@@ -187,4 +187,3 @@ def _print_summary(result, json_path: Path | None, csv_path: Path | None, consol
         )
 
     console.print(table)
-

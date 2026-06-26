@@ -42,12 +42,14 @@ def export_groups_to_csv(groups: list[DuplicateGroup], output_path: str | Path) 
     path.parent.mkdir(parents=True, exist_ok=True)
 
     fieldnames = [
+        "record_type",
         "group_id",
         "similarity_score",
         "recommended_file_to_keep",
         "is_recommended",
         "path",
         "filename",
+        "media_type",
         "file_size",
         "duration",
         "width",
@@ -82,6 +84,7 @@ def export_scan_report_to_csv(result: ScanRunResult, output_path: str | Path) ->
         "is_recommended",
         "path",
         "filename",
+        "media_type",
         "file_size",
         "duration",
         "width",
@@ -120,6 +123,7 @@ def _csv_row(group: DuplicateGroup, record: VideoRecord) -> dict[str, object]:
     row = _record_csv_row(record)
     row.update(
         {
+            "record_type": "duplicate_candidate",
             "group_id": group.group_id,
             "similarity_score": round(group.similarity_score, 4),
             "recommended_file_to_keep": group.recommended_keep,
@@ -139,6 +143,7 @@ def _record_csv_row(record: VideoRecord) -> dict[str, object]:
         "is_recommended": "",
         "path": record.path,
         "filename": metadata.filename,
+        "media_type": metadata.media_type,
         "file_size": metadata.file_size,
         "duration": metadata.duration,
         "width": metadata.width,

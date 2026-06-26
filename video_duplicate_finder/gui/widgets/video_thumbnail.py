@@ -1,4 +1,4 @@
-"""Small thumbnail helpers for video review screens."""
+"""Small thumbnail helpers for media review screens."""
 
 from __future__ import annotations
 
@@ -7,13 +7,55 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 
+from video_duplicate_finder.config import media_type_for_extension
 
-def load_video_thumbnail(path: str | Path, width: int = 420, height: int = 236) -> QPixmap | None:
-    """Return a scaled video thumbnail, or None when no frame can be read."""
-    video_path = Path(path)
-    if not video_path.exists():
+
+def load_media_thumbnail(path: str | Path, width: int = 420, height: int = 236) -> QPixmap | None:
+    """Return a scaled media thumbnail, or None when no image/frame can be read."""
+    media_path = Path(path)
+    if not media_path.exists():
         return None
 
+    media_type = media_type_for_extension(media_path.suffix)
+    if media_type in {"image", "gif"}:
+        return _load_pillow_thumbnail(media_path, width, height)
+    return _load_video_frame_thumbnail(media_path, width, height)
+
+
+def load_video_thumbnail(path: str | Path, width: int = 420, height: int = 236) -> QPixmap | None:
+    """Backward-compatible alias for loading a media thumbnail."""
+    return load_media_thumbnail(path, width, height)
+
+
+def _load_pillow_thumbnail(path: Path, width: int, height: int) -> QPixmap | None:
+    try:
+        from PIL import ImageOps
+        from PIL import Image
+    except Exception:
+        return None
+
+    try:
+        with Image.open(path) as image:
+            if getattr(image, "is_animated", False):
+                frame_count = int(getattr(image, "n_frames", 1) or 1)
+                target_frame = max(0, min(int(frame_count * 0.1), frame_count - 1))
+                image.seek(target_frame)
+            normalized = ImageOps.exif_transpose(image).convert("RGBA")
+            normalized.thumbnail((width, height))
+            image_data = normalized.tobytes("raw", "RGBA")
+            qimage = QImage(
+                image_data,
+                normalized.width,
+                normalized.height,
+                normalized.width * 4,
+                QImage.Format.Format_RGBA8888,
+            ).copy()
+            return QPixmap.fromImage(qimage)
+    except Exception:
+        return None
+
+
+def _load_video_frame_thumbnail(video_path: Path, width: int, height: int) -> QPixmap | None:
     try:
         import cv2
     except Exception:

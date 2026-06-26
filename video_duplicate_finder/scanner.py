@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from video_duplicate_finder.config import SUPPORTED_VIDEO_EXTENSIONS
+from video_duplicate_finder.config import SUPPORTED_MEDIA_EXTENSIONS
 
 
 def normalize_extensions(extensions: Iterable[str]) -> frozenset[str]:
@@ -22,9 +22,9 @@ def scan_folder(
     folder_path: str | Path,
     *,
     recursive: bool = False,
-    extensions: Iterable[str] = SUPPORTED_VIDEO_EXTENSIONS,
+    extensions: Iterable[str] = SUPPORTED_MEDIA_EXTENSIONS,
 ) -> list[Path]:
-    """Return supported video files from a folder."""
+    """Return supported media files from a folder."""
 
     folder = Path(folder_path).expanduser()
     if not folder.exists():
@@ -34,14 +34,13 @@ def scan_folder(
 
     supported_extensions = normalize_extensions(extensions)
     iterator = folder.rglob("*") if recursive else folder.iterdir()
-    videos: list[Path] = []
+    media_files: list[Path] = []
 
     for path in iterator:
         try:
             if path.is_file() and path.suffix.lower() in supported_extensions:
-                videos.append(path.resolve())
+                media_files.append(path.resolve())
         except OSError:
             continue
 
-    return sorted(videos, key=lambda item: str(item).lower())
-
+    return sorted(media_files, key=lambda item: str(item).lower())

@@ -1,4 +1,4 @@
-"""SQLite cache for video scan results."""
+"""SQLite cache for media scan results."""
 
 from __future__ import annotations
 
@@ -38,9 +38,9 @@ class ScanCache:
             self._connection.close()
             self._connection = None
 
-    def load_if_current(self, video_path: str | Path) -> VideoRecord | None:
+    def load_if_current(self, media_path: str | Path) -> VideoRecord | None:
         connection = self._require_connection()
-        path = Path(video_path).expanduser().resolve()
+        path = Path(media_path).expanduser().resolve()
 
         try:
             stat = path.stat()

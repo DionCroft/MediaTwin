@@ -1,4 +1,4 @@
-"""Configuration defaults for video duplicate detection."""
+"""Configuration defaults for media duplicate detection."""
 
 from __future__ import annotations
 
@@ -17,6 +17,23 @@ SUPPORTED_VIDEO_EXTENSIONS = frozenset(
         ".wmv",
     }
 )
+SUPPORTED_IMAGE_EXTENSIONS = frozenset(
+    {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".bmp",
+        ".tif",
+        ".tiff",
+        ".webp",
+    }
+)
+SUPPORTED_GIF_EXTENSIONS = frozenset({".gif"})
+SUPPORTED_MEDIA_EXTENSIONS = frozenset(
+    SUPPORTED_VIDEO_EXTENSIONS
+    | SUPPORTED_IMAGE_EXTENSIONS
+    | SUPPORTED_GIF_EXTENSIONS
+)
 
 DEFAULT_SAMPLE_POSITIONS = (0.05, 0.15, 0.25, 0.50, 0.75, 0.95)
 
@@ -27,7 +44,7 @@ class ScanConfig:
 
     recursive: bool = False
     supported_extensions: frozenset[str] = field(
-        default_factory=lambda: SUPPORTED_VIDEO_EXTENSIONS
+        default_factory=lambda: SUPPORTED_MEDIA_EXTENSIONS
     )
     sample_positions: tuple[float, ...] = DEFAULT_SAMPLE_POSITIONS
     frame_hash_distance_threshold: int = 10
@@ -41,3 +58,17 @@ class ScanConfig:
         default_factory=lambda: Path(".video_duplicate_finder_cache.sqlite3")
     )
 
+
+def media_type_for_extension(extension: str) -> str:
+    """Return the broad media type for a file extension."""
+
+    value = extension.lower()
+    if not value.startswith("."):
+        value = f".{value}"
+    if value in SUPPORTED_IMAGE_EXTENSIONS:
+        return "image"
+    if value in SUPPORTED_GIF_EXTENSIONS:
+        return "gif"
+    if value in SUPPORTED_VIDEO_EXTENSIONS:
+        return "video"
+    return "unknown"

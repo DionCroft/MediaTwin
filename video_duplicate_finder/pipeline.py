@@ -1,4 +1,4 @@
-"""Reusable backend workflow for scanning and matching videos."""
+"""Reusable backend workflow for scanning and matching media files."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def run_scan(
 
     active_config = config or ScanConfig()
     folder = Path(folder_path).expanduser().resolve()
-    video_paths = scan_folder(
+    media_paths = scan_folder(
         folder,
         recursive=active_config.recursive,
         extensions=active_config.supported_extensions,
@@ -43,18 +43,18 @@ def run_scan(
         cache = None
 
     try:
-        total = len(video_paths)
-        for index, video_path in enumerate(video_paths, start=1):
+        total = len(media_paths)
+        for index, media_path in enumerate(media_paths, start=1):
             record = None
             if cache is not None:
-                record = cache.load_if_current(video_path)
+                record = cache.load_if_current(media_path)
                 if record is not None:
                     cache_hits += 1
 
             if record is None:
-                metadata = extract_metadata(video_path)
+                metadata = extract_metadata(media_path)
                 fingerprint = generate_fingerprint(
-                    video_path,
+                    media_path,
                     metadata,
                     sample_positions=active_config.sample_positions,
                     hash_size=active_config.hash_size,
@@ -65,7 +65,7 @@ def run_scan(
 
             records.append(record)
             if progress_callback is not None:
-                progress_callback(index, total, video_path)
+                progress_callback(index, total, media_path)
     finally:
         if isinstance(cache, ScanCache):
             cache.close()
@@ -83,7 +83,7 @@ def run_scan(
         records=records,
         duplicate_groups=duplicate_groups,
         failed_files=failed_files,
-        total_files=len(video_paths),
+        total_files=len(media_paths),
         cache_hits=cache_hits,
         cache_error=cache_error,
         processed_files=len(records),

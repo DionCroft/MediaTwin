@@ -32,16 +32,16 @@ class WelcomeScreen(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
 
-        title = QLabel("Video Duplicate Finder")
+        title = QLabel("Media Duplicate Finder")
         title.setObjectName("heroTitle")
         subtitle = QLabel(
-            "Find duplicate videos even when filenames, resolutions, or formats are different."
+            "Find duplicate videos, images, and GIFs even when filenames, resolutions, or formats are different."
         )
         subtitle.setObjectName("mutedLabel")
         subtitle.setWordWrap(True)
 
         self.folder_input = QLineEdit()
-        self.folder_input.setPlaceholderText("Choose a folder containing videos")
+        self.folder_input.setPlaceholderText("Choose a folder containing media files")
         browse_button = QPushButton("Select Folder")
         browse_button.clicked.connect(self._browse_folder)
 
@@ -129,7 +129,7 @@ class WelcomeScreen(QWidget):
             self.folder_input.setText(last_folder)
 
     def _browse_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Select video folder")
+        folder = QFileDialog.getExistingDirectory(self, "Select media folder")
         if folder:
             self.folder_input.setText(folder)
 

@@ -82,10 +82,12 @@ def find_duplicate_pairs(
 ) -> list[MatchResult]:
     """Find likely duplicate pairs across all usable fingerprints."""
 
-    usable_records = [record for record in records if record.fingerprint.frame_hashes]
+    usable_records = [record for record in records if record.fingerprint.is_usable]
     matches: list[MatchResult] = []
 
     for left, right in combinations(usable_records, 2):
+        if not _media_types_are_compatible(left, right):
+            continue
         if not _durations_are_compatible(left, right, config):
             continue
 
@@ -98,6 +100,10 @@ def find_duplicate_pairs(
             matches.append(match)
 
     return matches
+
+
+def _media_types_are_compatible(left: VideoRecord, right: VideoRecord) -> bool:
+    return left.metadata.media_type == right.metadata.media_type
 
 
 def _hash_bit_length(hashes: list[str]) -> int:
@@ -121,4 +127,3 @@ def _durations_are_compatible(
         max(left_duration, right_duration) * config.duration_tolerance_ratio,
     )
     return difference <= tolerance
-

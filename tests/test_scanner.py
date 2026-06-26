@@ -5,15 +5,22 @@ import pytest
 from video_duplicate_finder.scanner import scan_folder
 
 
-def test_scan_folder_detects_supported_video_files(tmp_path: Path) -> None:
+def test_scan_folder_detects_supported_media_files(tmp_path: Path) -> None:
     video = tmp_path / "clip.MP4"
+    image = tmp_path / "photo.PNG"
+    gif = tmp_path / "loop.GIF"
     ignored = tmp_path / "notes.txt"
     video.write_bytes(b"fake")
-    ignored.write_text("not a video")
+    image.write_bytes(b"fake")
+    gif.write_bytes(b"fake")
+    ignored.write_text("not media")
 
     results = scan_folder(tmp_path)
 
-    assert results == [video.resolve()]
+    assert results == sorted(
+        [gif.resolve(), image.resolve(), video.resolve()],
+        key=lambda item: str(item).lower(),
+    )
 
 
 def test_scan_folder_respects_recursive_flag(tmp_path: Path) -> None:
@@ -37,4 +44,3 @@ def test_scan_folder_respects_recursive_flag(tmp_path: Path) -> None:
 def test_scan_folder_rejects_missing_folder(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         scan_folder(tmp_path / "missing")
-

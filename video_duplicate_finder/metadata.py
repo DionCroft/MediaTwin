@@ -1,4 +1,4 @@
-"""Video metadata extraction."""
+"""Media metadata extraction."""
 
 from __future__ import annotations
 
@@ -7,13 +7,15 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from video_duplicate_finder.config import media_type_for_extension
 from video_duplicate_finder.models import VideoMetadata
 
 
-def extract_metadata(video_path: str | Path) -> VideoMetadata:
-    """Extract file and stream metadata for a video."""
+def extract_metadata(media_path: str | Path) -> VideoMetadata:
+    """Extract file and stream metadata for a supported media file."""
 
-    path = Path(video_path).expanduser().resolve()
+    path = Path(media_path).expanduser().resolve()
+    media_type = media_type_for_extension(path.suffix)
     try:
         stat = path.stat()
     except OSError as exc:
@@ -27,15 +29,21 @@ def extract_metadata(video_path: str | Path) -> VideoMetadata:
             codec=None,
             modified_time=0.0,
             error=str(exc),
+            media_type=media_type,
         )
 
-    stream_data = _metadata_from_ffprobe(path)
-    if not stream_data:
-        stream_data = _metadata_from_opencv(path)
+    if media_type in {"image", "gif"}:
+        stream_data = _metadata_from_pillow(path, media_type)
+        unavailable_message = "Image metadata unavailable; install Pillow or check the file."
+    else:
+        stream_data = _metadata_from_ffprobe(path)
+        if not stream_data:
+            stream_data = _metadata_from_opencv(path)
+        unavailable_message = "Metadata unavailable; install ffmpeg/ffprobe or opencv-python."
 
     error = None
     if not stream_data:
-        error = "Metadata unavailable; install ffmpeg/ffprobe or opencv-python."
+        error = unavailable_message
 
     return VideoMetadata(
         path=str(path),
@@ -47,7 +55,40 @@ def extract_metadata(video_path: str | Path) -> VideoMetadata:
         codec=stream_data.get("codec"),
         modified_time=stat.st_mtime,
         error=error,
+        media_type=media_type,
     )
+
+
+def _metadata_from_pillow(path: Path, media_type: str) -> dict[str, Any]:
+    try:
+        from PIL import Image
+    except ImportError:
+        return {}
+
+    try:
+        with Image.open(path) as image:
+            width, height = image.size
+            duration = _gif_duration_seconds(image) if media_type == "gif" else None
+            return {
+                "duration": duration,
+                "width": width if width > 0 else None,
+                "height": height if height > 0 else None,
+                "codec": (image.format or media_type).lower(),
+            }
+    except Exception:
+        return {}
+
+
+def _gif_duration_seconds(image) -> float | None:
+    frame_count = int(getattr(image, "n_frames", 1) or 1)
+    total_ms = 0.0
+    for frame_index in range(frame_count):
+        try:
+            image.seek(frame_index)
+        except EOFError:
+            break
+        total_ms += float(image.info.get("duration") or 0)
+    return (total_ms / 1000.0) if total_ms > 0 else None
 
 
 def _metadata_from_ffprobe(path: Path) -> dict[str, Any]:
@@ -154,4 +195,3 @@ def _positive_int(value: Any) -> int | None:
     except (TypeError, ValueError):
         return None
     return result if result > 0 else None
-

@@ -135,7 +135,7 @@ class ResultsScreen(QWidget):
         space = sum(potential_space_saved(group) for group in groups)
         processed = self.result.processed_files or len(self.result.records)
         self.summary_label.setText(
-            f"Processed {processed} of {self.result.total_files} video(s). "
+            f"Processed {processed} of {self.result.total_files} media file(s). "
             f"Found {len(groups)} duplicate group(s), involving {files_in_groups} file(s). "
             f"Potential space saved: {format_file_size(space)}."
         )
@@ -208,11 +208,11 @@ class ResultsScreen(QWidget):
         if self.result.cancelled:
             return "The scan was cancelled before duplicate groups were found."
         if self.result.total_files == 0:
-            return "No supported videos were found. Try another folder or enable subfolders."
+            return "No supported media files were found. Try another folder or enable subfolders."
         if self.result.failed_files and not self.result.duplicate_groups:
             return (
                 "No duplicate groups were found, but some files need attention. "
-                "Export a report or rescan after checking those videos."
+                "Export a report or rescan after checking those files."
             )
         if not self.result.duplicate_groups:
             return (

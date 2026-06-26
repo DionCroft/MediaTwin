@@ -47,7 +47,7 @@ from video_duplicate_finder.models import DuplicateGroup, ScanRunResult, VideoRe
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Video Duplicate Finder")
+        self.setWindowTitle("Media Duplicate Finder")
         self.resize(1180, 780)
 
         self.app_settings = load_app_settings()
@@ -166,7 +166,7 @@ class MainWindow(QMainWindow):
         self.scan_worker.moveToThread(self.worker_thread)
 
         self.worker_thread.started.connect(self.scan_worker.run)
-        self.scan_worker.video_count_found.connect(self.scanning_screen.set_video_count)
+        self.scan_worker.media_count_found.connect(self.scanning_screen.set_media_count)
         self.scan_worker.progress.connect(self.scanning_screen.update_progress)
         self.scan_worker.finished.connect(self._scan_finished)
         self.scan_worker.cancelled.connect(self._scan_cancelled)
@@ -396,7 +396,7 @@ class MainWindow(QMainWindow):
         response = QMessageBox.question(
             self,
             "Clear cache",
-            "Clear the fingerprint cache? Videos will not be changed.",
+            "Clear the fingerprint cache? Media files will not be changed.",
         )
         if response != QMessageBox.StandardButton.Yes:
             return
@@ -490,10 +490,10 @@ class MainWindow(QMainWindow):
         if result.cancelled:
             return (
                 f"Scan cancelled after {result.processed_files} of "
-                f"{result.total_files} video(s)."
+                f"{result.total_files} media file(s)."
             )
         if result.total_files == 0:
-            return "No supported videos were found in the selected folder."
+            return "No supported media files were found in the selected folder."
         if not result.duplicate_groups:
             return "No likely duplicates were found with the current settings."
         if result.failed_files:

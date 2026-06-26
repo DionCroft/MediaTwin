@@ -65,7 +65,7 @@ class SettingsScreen(QWidget):
 
         self.cache_path_input = QLineEdit()
         self.cache_size_label = QLabel("Cache size: 0 B")
-        self.cache_entries_label = QLabel("Cached videos: 0")
+        self.cache_entries_label = QLabel("Cached media files: 0")
         self.settings_file_label = QLabel("Settings file: Not saved yet")
         self.settings_file_label.setWordWrap(True)
         self.deletion_log_label = QLabel("Deletion log: Not created yet")
@@ -131,7 +131,7 @@ class SettingsScreen(QWidget):
         settings_path = Path(settings_path)
         deletion_log = Path(deletion_log)
         self.cache_size_label.setText(f"Cache size: {format_file_size(cache_size)}")
-        self.cache_entries_label.setText(f"Cached videos: {cache_entries}")
+        self.cache_entries_label.setText(f"Cached media files: {cache_entries}")
         self.settings_file_label.setText(f"Settings file: {settings_path}")
         if deletion_log.exists():
             self.deletion_log_label.setText(f"Deletion log: {deletion_log}")

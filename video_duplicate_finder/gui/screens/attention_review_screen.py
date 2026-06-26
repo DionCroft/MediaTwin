@@ -28,7 +28,7 @@ from video_duplicate_finder.gui.formatting import (
     format_resolution,
 )
 from video_duplicate_finder.gui.widgets.metadata_panel import MetadataPanel
-from video_duplicate_finder.gui.widgets.video_thumbnail import load_video_thumbnail
+from video_duplicate_finder.gui.widgets.video_thumbnail import load_media_thumbnail
 from video_duplicate_finder.models import VideoRecord
 
 
@@ -189,7 +189,7 @@ class AttentionReviewScreen(QWidget):
             self._set_thumbnail_placeholder("Select a file to load a thumbnail.")
             return
 
-        pixmap = load_video_thumbnail(record.path)
+        pixmap = load_media_thumbnail(record.path)
         if pixmap is None:
             self._set_thumbnail_placeholder(
                 "No thumbnail could be read.\nUse Open File to inspect this video."

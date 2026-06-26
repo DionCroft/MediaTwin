@@ -24,6 +24,7 @@ class MetadataPanel(QGroupBox):
         for key, label in (
             ("filename", "Filename"),
             ("path", "Path"),
+            ("media_type", "Media type"),
             ("duration", "Duration"),
             ("resolution", "Resolution"),
             ("file_size", "File size"),
@@ -46,6 +47,7 @@ class MetadataPanel(QGroupBox):
         metadata = record.metadata
         self.labels["filename"].setText(metadata.filename)
         self.labels["path"].setText(metadata.path)
+        self.labels["media_type"].setText(metadata.media_type.upper())
         self.labels["duration"].setText(format_duration(metadata.duration))
         self.labels["resolution"].setText(
             format_resolution(metadata.width, metadata.height)

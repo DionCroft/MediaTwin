@@ -41,10 +41,12 @@ class DuplicateGroupCard(QFrame):
         detail_grid.setVerticalSpacing(8)
         detail_grid.addWidget(QLabel("Files"), 0, 0)
         detail_grid.addWidget(QLabel(str(len(group.files))), 0, 1)
-        detail_grid.addWidget(QLabel("Similarity"), 1, 0)
-        detail_grid.addWidget(score_value, 1, 1)
-        detail_grid.addWidget(QLabel("Potential saving"), 2, 0)
-        detail_grid.addWidget(saved_label, 2, 1)
+        detail_grid.addWidget(QLabel("Type"), 1, 0)
+        detail_grid.addWidget(QLabel(_group_media_type(group)), 1, 1)
+        detail_grid.addWidget(QLabel("Similarity"), 2, 0)
+        detail_grid.addWidget(score_value, 2, 1)
+        detail_grid.addWidget(QLabel("Potential saving"), 3, 0)
+        detail_grid.addWidget(saved_label, 3, 1)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
@@ -62,3 +64,10 @@ class DuplicateGroupCard(QFrame):
         self.setObjectName("selectedCard" if selected else "card")
         self.style().unpolish(self)
         self.style().polish(self)
+
+
+def _group_media_type(group: DuplicateGroup) -> str:
+    media_types = {record.metadata.media_type for record in group.files}
+    if len(media_types) == 1:
+        return next(iter(media_types)).upper()
+    return "Mixed"

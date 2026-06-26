@@ -17,6 +17,7 @@ class VideoMetadata:
     codec: str | None
     modified_time: float
     error: str | None = None
+    media_type: str = "video"
 
     @property
     def resolution_pixels(self) -> int:
@@ -27,7 +28,19 @@ class VideoMetadata:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "VideoMetadata":
-        return cls(**data)
+        known_fields = {
+            "path",
+            "filename",
+            "file_size",
+            "duration",
+            "width",
+            "height",
+            "codec",
+            "modified_time",
+            "error",
+            "media_type",
+        }
+        return cls(**{key: value for key, value in data.items() if key in known_fields})
 
 
 @dataclass(slots=True)

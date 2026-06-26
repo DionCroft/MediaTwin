@@ -1,2 +1,1 @@
-"""PySide6 desktop GUI for Video Duplicate Finder."""
-
+"""PySide6 desktop GUI for Media Duplicate Finder."""
