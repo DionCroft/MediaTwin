@@ -18,6 +18,7 @@ env/
 # Build output
 build/
 dist/
+release/
 *.spec
 
 # Local scan/cache artifacts
@@ -34,4 +35,3 @@ results.csv
 Thumbs.db
 .vscode/
 .idea/
-

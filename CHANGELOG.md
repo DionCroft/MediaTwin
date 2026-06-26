@@ -8,6 +8,7 @@
 - Kept matching within media type so videos, images, and GIFs are grouped separately.
 - Updated GUI preview/review flows so image and GIF duplicates can be thumbnailed and safely selected for Recycle Bin deletion.
 - Updated CLI, README, and Windows packaging display names to Media Duplicate Finder.
+- Added `deploy_windows.ps1` for one-command Windows deployment with checks, build, zip, and SHA256 output.
 
 ## 0.2.0 - Desktop Polish
 

@@ -178,6 +178,25 @@ The script creates `.venv` if needed, installs dependencies, and writes the pack
 dist\Media Duplicate Finder\Media Duplicate Finder.exe
 ```
 
+For a full one-command deployment, run:
+
+```bash
+powershell -ExecutionPolicy Bypass -File deploy_windows.ps1
+```
+
+The deploy script creates/updates `.venv`, installs dependencies, runs compile checks and tests, builds the Windows app, then creates a zipped release and SHA256 checksum under:
+
+```text
+release\
+```
+
+Useful deploy options:
+
+```bash
+powershell -ExecutionPolicy Bypass -File deploy_windows.ps1 -SkipTests
+powershell -ExecutionPolicy Bypass -File deploy_windows.ps1 -Version 0.3.0
+```
+
 For a production Windows icon, convert or replace `assets/app_icon_placeholder.svg` with `assets/app_icon.ico`; the build script will use it automatically when present.
 
 If FFmpeg is installed separately, make sure `ffprobe.exe` is available on `PATH` so metadata extraction can use it. OpenCV remains the fallback for basic metadata and frame extraction.
