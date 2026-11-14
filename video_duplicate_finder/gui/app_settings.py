@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+import os
+import tempfile
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -16,10 +18,12 @@ class AppSettings:
     recursive_default: bool = False
     frame_distance: int = 10
     min_matching_frames: int = 4
-    export_location: str = str(Path.home() / "Documents")
+    export_location: str = field(default_factory=lambda: str(Path.home() / "Documents"))
     theme: str = "Light"
-    cache_path: str = str(default_cache_path())
+    cache_path: str = field(default_factory=lambda: str(default_cache_path()))
     last_folder: str = ""
+    max_workers: int = 2
+    file_timeout_seconds: int = 90
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -32,27 +36,38 @@ def load_app_settings(path: str | Path | None = None) -> AppSettings:
     try:
         payload = json.loads(settings_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        save_app_settings(defaults, settings_path)
         return defaults
 
     if not isinstance(payload, dict):
-        save_app_settings(defaults, settings_path)
         return defaults
 
     values = defaults.to_dict()
     values.update({key: payload[key] for key in values if key in payload})
     settings = _coerce_settings(values)
-    save_app_settings(settings, settings_path)
     return settings
 
 
 def save_app_settings(settings: AppSettings, path: str | Path | None = None) -> Path:
     settings_path = Path(path) if path is not None else settings_file_path()
     settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(
-        json.dumps(settings.to_dict(), indent=2),
-        encoding="utf-8",
-    )
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=settings_path.parent,
+            prefix="settings-",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            json.dump(settings.to_dict(), handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, settings_path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return settings_path
 
 
@@ -91,6 +106,12 @@ def _coerce_settings(values: dict[str, object]) -> AppSettings:
         theme=theme,
         cache_path=str(values.get("cache_path") or default_cache_path()),
         last_folder=str(values.get("last_folder") or ""),
+        max_workers=_clamp_int(
+            values.get("max_workers", 2), minimum=1, maximum=8, default=2
+        ),
+        file_timeout_seconds=_clamp_int(
+            values.get("file_timeout_seconds", 90), minimum=10, maximum=600, default=90
+        ),
     )
 
 
@@ -102,7 +123,9 @@ def _to_bool(value: object) -> bool:
     return bool(value)
 
 
-def _clamp_float(value: object, *, minimum: float, maximum: float, default: float) -> float:
+def _clamp_float(
+    value: object, *, minimum: float, maximum: float, default: float
+) -> float:
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -116,4 +139,3 @@ def _clamp_int(value: object, *, minimum: int, maximum: int, default: int) -> in
     except (TypeError, ValueError):
         return default
     return max(minimum, min(maximum, number))
-

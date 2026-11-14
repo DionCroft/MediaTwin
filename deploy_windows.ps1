@@ -8,6 +8,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Invoke-Checked {
+    param([scriptblock]$Command, [string]$Step)
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Step failed with exit code $LASTEXITCODE"
+    }
+}
+
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ProjectRoot
 
@@ -27,10 +35,17 @@ function Remove-WorkspaceItem {
         return
     }
 
-    $workspace = (Resolve-Path -LiteralPath $ProjectRoot).Path
-    $resolved = (Resolve-Path -LiteralPath $Path).Path
-    if (-not $resolved.StartsWith($workspace, [System.StringComparison]::OrdinalIgnoreCase)) {
+    $workspace = (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath.TrimEnd('\')
+    $resolved = (Resolve-Path -LiteralPath $Path).ProviderPath
+    if (-not $resolved.StartsWith($workspace + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to remove path outside workspace: $resolved"
+    }
+    $current = $resolved
+    while ($current -ne $workspace) {
+        if ((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Refusing to remove through a link or junction: $current"
+        }
+        $current = Split-Path -Parent $current
     }
 
     Remove-Item -LiteralPath $resolved -Recurse -Force
@@ -64,26 +79,29 @@ function Compress-WithRetry {
 if (-not $Version) {
     $Version = Get-Date -Format "yyyyMMdd-HHmm"
 }
+if ($Version -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') {
+    throw "Version must contain only letters, numbers, dots, underscores, and hyphens (1-64 characters)."
+}
 
 Write-Host "Preparing $AppName deployment..."
 
 if (-not (Test-Path $VenvPython)) {
     Write-Host "Creating virtual environment..."
-    python -m venv .venv
+    Invoke-Checked { python -m venv .venv } "Virtual environment creation"
 }
 
 if (-not $SkipInstall) {
     Write-Host "Installing dependencies..."
-    & $VenvPython -m pip install --upgrade pip
-    & $VenvPython -m pip install -r requirements.txt
+    Invoke-Checked { & $VenvPython -m pip install --upgrade pip } "pip upgrade"
+    Invoke-Checked { & $VenvPython -m pip install -r requirements.txt } "Dependency installation"
 }
 
 if (-not $SkipTests) {
     Write-Host "Running compile check..."
-    & $VenvPython -B -m compileall -q video_duplicate_finder tests
+    Invoke-Checked { & $VenvPython -B -m compileall -q video_duplicate_finder tests } "Compile check"
 
     Write-Host "Running tests..."
-    & $VenvPython -B -m pytest
+    Invoke-Checked { & $VenvPython -B -m pytest } "Tests"
 }
 
 if (-not $SkipBuild) {
@@ -92,7 +110,7 @@ if (-not $SkipBuild) {
     Remove-WorkspaceItem $DistDir
 
     Write-Host "Building Windows app..."
-    & powershell -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot "build_windows.ps1") -SkipInstall
+    Invoke-Checked { & powershell -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot "build_windows.ps1") -SkipInstall } "Windows build"
 
     if (-not (Test-Path -LiteralPath $AppExe)) {
         throw "Expected build output was not created: $AppExe"

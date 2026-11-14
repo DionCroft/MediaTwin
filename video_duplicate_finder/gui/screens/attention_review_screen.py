@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -19,6 +20,10 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QMenu,
+    QHeaderView,
+    QToolButton,
+    QStyle,
 )
 
 from video_duplicate_finder.gui.formatting import (
@@ -28,21 +33,23 @@ from video_duplicate_finder.gui.formatting import (
     format_resolution,
 )
 from video_duplicate_finder.gui.widgets.metadata_panel import MetadataPanel
-from video_duplicate_finder.gui.widgets.video_thumbnail import load_media_thumbnail
 from video_duplicate_finder.models import VideoRecord
 
 
 class AttentionReviewScreen(QWidget):
     back_requested = Signal()
     delete_requested = Signal(object)
+    selection_changed = Signal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.records: list[VideoRecord] = []
         self._updating_checks = False
+        self.selected_paths: set[str] = set()
+        self.protected_paths: set[str] = set()
 
         self.title = QLabel("Review Files Needing Attention")
-        self.title.setObjectName("heroTitle")
+        self.title.setObjectName("sectionTitle")
         self.subtitle = QLabel(
             "These files decoded with warnings or could not be fully fingerprinted."
         )
@@ -56,7 +63,8 @@ class AttentionReviewScreen(QWidget):
         self.thumbnail_label = QLabel("Select a file to load a thumbnail.")
         self.thumbnail_label.setObjectName("thumbnailLabel")
         self.thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.thumbnail_label.setMinimumSize(420, 236)
+        self.thumbnail_label.setMinimumSize(220, 124)
+        self.thumbnail_label.setMaximumHeight(236)
         self.thumbnail_label.setWordWrap(True)
         thumbnail_layout.addWidget(self.thumbnail_label)
 
@@ -81,9 +89,12 @@ class AttentionReviewScreen(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setAlternatingRowColors(True)
+        self.table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch
+        )
         self.table.verticalHeader().setDefaultSectionSize(44)
         self.table.itemSelectionChanged.connect(self._update_selection)
-        self.table.cellDoubleClicked.connect(self._toggle_row_delete_selection)
+        self.table.cellDoubleClicked.connect(lambda row, column: self._open_file())
 
         self.selection_summary_label = QLabel("No files selected for Recycle Bin.")
         self.selection_summary_label.setObjectName("statusLabel")
@@ -92,12 +103,17 @@ class AttentionReviewScreen(QWidget):
         self.open_file_button = QPushButton("Open File")
         self.open_folder_button = QPushButton("Open Containing Folder")
         self.copy_path_button = QPushButton("Copy Path")
-        self.select_all_button = QPushButton("Select All Attention Files")
-        self.clear_selection_button = QPushButton("Clear Selection")
-        self.delete_button = QPushButton("Review Files To Delete")
-        self.delete_button.setObjectName("dangerButton")
+        self.select_all_button = QPushButton("Queue all")
+        self.clear_selection_button = QPushButton("Clear")
+        self.clear_selection_button.setToolTip("Clear attention-file selection")
+        self.delete_button = QPushButton("Review cleanup queue")
+        self.delete_button.setObjectName("primaryButton")
         self.delete_button.setEnabled(False)
-        self.back_button = QPushButton("Back To Results")
+        self.back_button = QToolButton()
+        self.back_button.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowBack)
+        )
+        self.back_button.setToolTip("Back to results")
 
         self.open_file_button.clicked.connect(self._open_file)
         self.open_folder_button.clicked.connect(self._open_folder)
@@ -108,9 +124,13 @@ class AttentionReviewScreen(QWidget):
         self.back_button.clicked.connect(self.back_requested.emit)
 
         action_row = QHBoxLayout()
-        action_row.addWidget(self.open_file_button)
-        action_row.addWidget(self.open_folder_button)
-        action_row.addWidget(self.copy_path_button)
+        file_button = QPushButton("File actions")
+        file_menu = QMenu(file_button)
+        file_menu.addAction("Open file", self._open_file)
+        file_menu.addAction("Open containing folder", self._open_folder)
+        file_menu.addAction("Copy path", self._copy_path)
+        file_button.setMenu(file_menu)
+        action_row.addWidget(file_button)
         action_row.addStretch(1)
         action_row.addWidget(self.select_all_button)
         action_row.addWidget(self.clear_selection_button)
@@ -127,8 +147,12 @@ class AttentionReviewScreen(QWidget):
         layout.addWidget(self.selection_summary_label)
         layout.addLayout(action_row)
 
-    def set_records(self, records: list[VideoRecord]) -> None:
+    def set_records(
+        self, records: list[VideoRecord], selected_paths=(), protected_paths=()
+    ) -> None:
         self.records = list(records)
+        self.selected_paths = set(selected_paths)
+        self.protected_paths = set(protected_paths)
         self.title.setText("Review Files Needing Attention")
         self.subtitle.setText(
             f"{len(self.records)} file(s) decoded with warnings, produced partial samples, "
@@ -138,26 +162,47 @@ class AttentionReviewScreen(QWidget):
         self._update_summary()
 
     def _populate_table(self) -> None:
+        self._updating_checks = True
         self.table.setRowCount(0)
         self.table.setRowCount(len(self.records))
 
         for row, record in enumerate(self.records):
             metadata = record.metadata
-            checkbox = QCheckBox("Move")
+            checkbox = QCheckBox(
+                "Queued" if record.path in self.selected_paths else "Queue"
+            )
             checkbox.setProperty("path", record.path)
+            checkbox.setChecked(
+                record.path in self.selected_paths
+                and record.path not in self.protected_paths
+            )
+            if record.path in self.protected_paths:
+                checkbox.setText("Keep")
+                checkbox.setEnabled(False)
             checkbox.setToolTip(
                 "Tick to move this file to the Recycle Bin after confirmation."
             )
             checkbox.stateChanged.connect(self._on_delete_checkbox_changed)
+            checkbox.toggled.connect(
+                lambda checked, box=checkbox: box.setText(
+                    "Queued" if checked else "Queue"
+                )
+            )
 
             filename_item = QTableWidgetItem(metadata.filename)
             filename_item.setData(Qt.ItemDataRole.UserRole, record.path)
-            filename_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            filename_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+            )
 
             self.table.setCellWidget(row, 0, checkbox)
             self.table.setItem(row, 1, filename_item)
-            self.table.setItem(row, 2, _read_only_item(format_file_size(metadata.file_size)))
-            self.table.setItem(row, 3, _read_only_item(format_duration(metadata.duration)))
+            self.table.setItem(
+                row, 2, _read_only_item(format_file_size(metadata.file_size))
+            )
+            self.table.setItem(
+                row, 3, _read_only_item(format_duration(metadata.duration))
+            )
             self.table.setItem(
                 row,
                 4,
@@ -170,9 +215,9 @@ class AttentionReviewScreen(QWidget):
             )
             self.table.setItem(row, 6, _read_only_item(_attention_reason(record)))
 
-        self.table.resizeColumnsToContents()
-        self.table.setColumnWidth(0, 165)
-        self.table.setColumnWidth(6, 380)
+        self.table.setColumnWidth(0, 100)
+        self.table.setColumnWidth(6, 220)
+        self._updating_checks = False
         if self.records:
             self.table.selectRow(0)
         else:
@@ -189,15 +234,25 @@ class AttentionReviewScreen(QWidget):
             self._set_thumbnail_placeholder("Select a file to load a thumbnail.")
             return
 
-        pixmap = load_media_thumbnail(record.path)
-        if pixmap is None:
+        pixmap = (
+            QPixmap(record.fingerprint.thumbnail_path)
+            if record.fingerprint.thumbnail_path
+            else QPixmap()
+        )
+        if pixmap.isNull():
             self._set_thumbnail_placeholder(
-                "No thumbnail could be read.\nUse Open File to inspect this video."
+                "Thumbnail unavailable.\nRescan or open the file externally."
             )
             return
 
-        self.thumbnail_label.setPixmap(pixmap)
-        self.thumbnail_label.setText("")
+        self.thumbnail_label.setPixmap(
+            pixmap.scaled(
+                420,
+                236,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
 
     def _set_thumbnail_placeholder(self, text: str) -> None:
         self.thumbnail_label.clear()
@@ -240,7 +295,7 @@ class AttentionReviewScreen(QWidget):
 
     def _set_row_checked(self, row: int, checked: bool) -> None:
         checkbox = self._delete_checkbox(row)
-        if checkbox is not None:
+        if checkbox is not None and checkbox.isEnabled():
             checkbox.setChecked(checked)
 
     def _toggle_row_delete_selection(self, row: int, column: int) -> None:
@@ -271,6 +326,7 @@ class AttentionReviewScreen(QWidget):
         total_size = sum(record.metadata.file_size for record in records)
         selected_count = len(records)
         self.delete_button.setEnabled(selected_count > 0)
+        self.selection_changed.emit(self._checked_delete_paths())
 
         if selected_count == 0:
             self.selection_summary_label.setText("No files selected for Recycle Bin.")
@@ -309,7 +365,9 @@ class AttentionReviewScreen(QWidget):
         path = Path(record.path)
         folder = path.parent if path.parent.exists() else None
         if folder is None:
-            QMessageBox.warning(self, "Folder missing", "The containing folder no longer exists.")
+            QMessageBox.warning(
+                self, "Folder missing", "The containing folder no longer exists."
+            )
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 

@@ -38,23 +38,24 @@ def group_duplicates(
     component_paths: dict[str, set[str]] = defaultdict(set)
     for path in parent:
         component_paths[find(path)].add(path)
+    matches_by_component: dict[str, list[MatchResult]] = defaultdict(list)
+    for match in matches:
+        matches_by_component[find(match.path_a)].append(match)
 
     groups: list[DuplicateGroup] = []
     for index, paths in enumerate(
         sorted(component_paths.values(), key=lambda items: sorted(items)[0]),
         start=1,
     ):
-        files = [records_by_path[path] for path in sorted(paths) if path in records_by_path]
+        files = [
+            records_by_path[path] for path in sorted(paths) if path in records_by_path
+        ]
         if len(files) < 2:
             continue
 
-        group_matches = [
-            match
-            for match in matches
-            if match.path_a in paths and match.path_b in paths
-        ]
+        group_matches = matches_by_component[find(next(iter(paths)))]
         similarity_score = (
-            sum(match.similarity_score for match in group_matches) / len(group_matches)
+            min(match.similarity_score for match in group_matches)
             if group_matches
             else 0.0
         )
@@ -81,12 +82,48 @@ def recommend_file_to_keep(records: list[VideoRecord]) -> VideoRecord:
     return max(records, key=_recommendation_key)
 
 
-def _recommendation_key(record: VideoRecord) -> tuple[int, int, float, float]:
+def _recommendation_key(record: VideoRecord) -> tuple[bool, int, int, float, float]:
     metadata = record.metadata
     return (
+        not record.needs_attention,
         metadata.resolution_pixels,
         metadata.file_size,
         metadata.duration or 0.0,
         metadata.modified_time,
     )
 
+
+def safe_cleanup_candidates(
+    groups: list[DuplicateGroup],
+    *,
+    minimum_similarity: float = 0.95,
+) -> list[str]:
+    """Select healthy copies directly matched to a healthy retained file.
+
+    A connected component helps browsing, but transitive matches are not proof
+    that every member is interchangeable with the chosen keeper.
+    """
+    protected = {group.recommended_keep for group in groups}
+    candidates: set[str] = set()
+    for group in groups:
+        records = {record.path: record for record in group.files}
+        keeper = records.get(group.recommended_keep)
+        if keeper is None or keeper.needs_attention:
+            continue
+        for match in group.matches:
+            if match.similarity_score < minimum_similarity:
+                continue
+            if match.path_a == keeper.path:
+                other = match.path_b
+            elif match.path_b == keeper.path:
+                other = match.path_a
+            else:
+                continue
+            record = records.get(other)
+            if (
+                record is not None
+                and not record.needs_attention
+                and other not in protected
+            ):
+                candidates.add(other)
+    return sorted(candidates)

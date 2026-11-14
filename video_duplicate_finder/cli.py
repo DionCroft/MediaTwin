@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from video_duplicate_finder.config import ScanConfig
@@ -27,7 +28,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "scan":
-        return _handle_scan(args)
+        try:
+            return _handle_scan(args)
+        except (OSError, ValueError) as exc:
+            print(f"Scan could not complete: {exc}", file=sys.stderr)
+            return 1
+        except KeyboardInterrupt:
+            print("Scan cancelled.", file=sys.stderr)
+            return 130
 
     parser.error(f"Unknown command: {args.command}")
     return 2
@@ -40,8 +48,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    scan_parser = subparsers.add_parser("scan", help="Scan a folder for duplicate media files.")
-    scan_parser.add_argument("folder", type=Path, help="Folder containing media files to scan.")
+    scan_parser = subparsers.add_parser(
+        "scan", help="Scan a folder for duplicate media files."
+    )
+    scan_parser.add_argument(
+        "folder", type=Path, help="Folder containing media files to scan."
+    )
+    scan_parser.add_argument(
+        "--workers", type=int, default=2, help="Parallel decoders (1-8; default 2)."
+    )
+    scan_parser.add_argument(
+        "--file-timeout",
+        type=float,
+        default=90,
+        help="Maximum analysis seconds per file.",
+    )
     scan_parser.add_argument(
         "--recursive",
         action="store_true",
@@ -93,7 +114,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _handle_scan(args: argparse.Namespace) -> int:
-    config = ScanConfig(recursive=args.recursive)
+    config = ScanConfig(
+        recursive=args.recursive,
+        max_workers=args.workers,
+        file_timeout_seconds=args.file_timeout,
+    )
     if args.threshold is not None:
         config.overall_similarity_threshold = args.threshold
     if args.frame_distance is not None:
@@ -104,6 +129,7 @@ def _handle_scan(args: argparse.Namespace) -> int:
         config.cache_path = args.cache
     if args.no_cache:
         config.use_cache = False
+    config.__post_init__()
 
     console = Console() if Console is not None else None
 
@@ -141,7 +167,9 @@ def _plain_progress(current: int, total: int, path: Path) -> None:
     print(f"[{current}/{total}] {path.name}")
 
 
-def _print_summary(result, json_path: Path | None, csv_path: Path | None, console) -> None:
+def _print_summary(
+    result, json_path: Path | None, csv_path: Path | None, console
+) -> None:
     lines = [
         f"Scanned: {result.total_files} media file(s)",
         f"Cache hits: {result.cache_hits}",

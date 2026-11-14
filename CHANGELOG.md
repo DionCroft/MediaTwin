@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0 - Safer Cleanup And Faster Review
+
+- Protected healthy keepers and limited bulk selection to direct, high-similarity matches; transitive groups require manual review.
+- Aligned partial video samples by timestamp position and rejected malformed/incompatible hashes.
+- Added conservative colour verification for still-image matches and honest visual/manual-review confidence labels.
+- Moved validated, logged Recycle Bin operations to a cancellable worker; changed files and missing/changed keepers fail safely.
+- Added a persistent cross-group cleanup queue, compact actions, selectable keepers, linked playback/seeking, GIF playback, preview zoom, and sampled-frame contact sheets.
+- Added paginated/searchable media results and live stage/thumbnail/cache/warning/throughput progress.
+- Unified GUI/CLI scans with bounded decoder processes, per-file timeouts, prompt cancellation, duration windows, and an exact image hash index.
+- Versioned and validated cached fingerprints, migrated legacy cache schemas, batched writes, retried failed files, and cleared generated preview storage.
+- Fixed console-free Windows diagnostic capture, atomic settings writes, scan shutdown handling, and result regrouping after cleanup.
+- Hardened deployment exit-code checks, version/path validation, and added Windows test/build CI and regression coverage.
+
 ## 0.3.0 - Image And GIF Support
 
 - Expanded scanning beyond videos to include `.jpg`, `.jpeg`, `.png`, `.bmp`, `.tif`, `.tiff`, `.webp`, and `.gif`.

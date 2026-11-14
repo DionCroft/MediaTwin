@@ -5,7 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from video_duplicate_finder.config import DEFAULT_SAMPLE_POSITIONS, media_type_for_extension
+from video_duplicate_finder.config import (
+    DEFAULT_SAMPLE_POSITIONS,
+    media_type_for_extension,
+)
 from video_duplicate_finder.models import VideoFingerprint, VideoMetadata
 from video_duplicate_finder.native_stderr import capture_native_stderr
 
@@ -16,21 +19,30 @@ def generate_fingerprint(
     *,
     sample_positions: Iterable[float] = DEFAULT_SAMPLE_POSITIONS,
     hash_size: int = 8,
+    thumbnail_path: Path | None = None,
 ) -> VideoFingerprint:
     """Generate perceptual hashes for a supported media file."""
 
     path = Path(media_path).expanduser().resolve()
     positions = tuple(float(position) for position in sample_positions)
     media_type = (
-        metadata.media_type if metadata is not None else media_type_for_extension(path.suffix)
+        metadata.media_type
+        if metadata is not None
+        else media_type_for_extension(path.suffix)
     )
 
     if media_type == "image":
-        return _generate_image_fingerprint(path, positions, hash_size=hash_size)
+        return _generate_image_fingerprint(
+            path, positions, hash_size=hash_size, thumbnail_path=thumbnail_path
+        )
     if media_type == "gif":
-        return _generate_gif_fingerprint(path, positions, hash_size=hash_size)
+        return _generate_gif_fingerprint(
+            path, positions, hash_size=hash_size, thumbnail_path=thumbnail_path
+        )
 
-    return _generate_video_fingerprint(path, metadata, positions, hash_size=hash_size)
+    return _generate_video_fingerprint(
+        path, metadata, positions, hash_size=hash_size, thumbnail_path=thumbnail_path
+    )
 
 
 def _generate_video_fingerprint(
@@ -39,6 +51,7 @@ def _generate_video_fingerprint(
     positions: tuple[float, ...],
     *,
     hash_size: int,
+    thumbnail_path: Path | None = None,
 ) -> VideoFingerprint:
     """Generate perceptual frame hashes for a video."""
 
@@ -55,6 +68,7 @@ def _generate_video_fingerprint(
 
     frame_hashes: list[str] = []
     sampled_positions: list[float] = []
+    contact_samples = []
     decoder_warnings: list[str] = []
     open_failed = False
 
@@ -66,7 +80,9 @@ def _generate_video_fingerprint(
             else:
                 frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
                 fps = float(capture.get(cv2.CAP_PROP_FPS) or 0)
-                duration = _duration_from_metadata_or_capture(metadata, frame_count, fps)
+                duration = _duration_from_metadata_or_capture(
+                    metadata, frame_count, fps
+                )
 
                 for position in valid_positions:
                     if frame_count > 0:
@@ -82,14 +98,21 @@ def _generate_video_fingerprint(
                     try:
                         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                         image = image_class.fromarray(rgb_frame)
-                        frame_hashes.append(str(imagehash.phash(image, hash_size=hash_size)))
+                        if not frame_hashes:
+                            _save_thumbnail(image, thumbnail_path)
+                        frame_hashes.append(
+                            str(imagehash.phash(image, hash_size=hash_size))
+                        )
                         sampled_positions.append(position)
+                        if thumbnail_path is not None:
+                            contact_samples.append(_contact_sample(position, image))
                     except Exception:
                         continue
         finally:
             capture.release()
 
     decoder_warnings = _decoder_warning_lines(native_stderr.output)
+    _save_contact_sheet(contact_samples, thumbnail_path)
 
     if open_failed:
         return VideoFingerprint(
@@ -135,6 +158,7 @@ def _generate_image_fingerprint(
     positions: tuple[float, ...],
     *,
     hash_size: int,
+    thumbnail_path: Path | None = None,
 ) -> VideoFingerprint:
     try:
         imagehash, image_class, image_ops = _load_image_dependencies()
@@ -149,7 +173,9 @@ def _generate_image_fingerprint(
     try:
         with image_class.open(path) as image:
             normalized = image_ops.exif_transpose(image).convert("RGB")
+            _save_thumbnail(normalized, thumbnail_path)
             phash = str(imagehash.phash(normalized, hash_size=hash_size))
+            color_hash = str(imagehash.colorhash(normalized))
     except Exception as exc:
         return VideoFingerprint(
             path=str(path),
@@ -165,6 +191,7 @@ def _generate_image_fingerprint(
         sampled_positions=list(sampled_positions),
         status="ok",
         hash_size=hash_size,
+        color_hash=color_hash,
     )
 
 
@@ -173,6 +200,7 @@ def _generate_gif_fingerprint(
     positions: tuple[float, ...],
     *,
     hash_size: int,
+    thumbnail_path: Path | None = None,
 ) -> VideoFingerprint:
     try:
         imagehash, image_class, _unused_image_ops = _load_image_dependencies()
@@ -186,6 +214,7 @@ def _generate_gif_fingerprint(
 
     frame_hashes: list[str] = []
     sampled_positions: list[float] = []
+    contact_samples = []
     valid_positions = _valid_positions_or_default(positions)
 
     try:
@@ -198,8 +227,12 @@ def _generate_gif_fingerprint(
                     frame = image.copy().convert("RGB")
                 except Exception:
                     continue
+                if not frame_hashes:
+                    _save_thumbnail(frame, thumbnail_path)
                 frame_hashes.append(str(imagehash.phash(frame, hash_size=hash_size)))
                 sampled_positions.append(position)
+                if thumbnail_path is not None:
+                    contact_samples.append(_contact_sample(position, frame))
     except Exception as exc:
         return VideoFingerprint(
             path=str(path),
@@ -216,6 +249,7 @@ def _generate_gif_fingerprint(
             hash_size=hash_size,
         )
 
+    _save_contact_sheet(contact_samples, thumbnail_path)
     status = "ok" if len(frame_hashes) == len(valid_positions) else "partial"
     error = (
         None
@@ -232,6 +266,45 @@ def _generate_gif_fingerprint(
     )
 
 
+def _contact_sample(position, image):
+    sample = image.copy().convert("RGB")
+    sample.thumbnail((160, 90))
+    return position, sample
+
+
+def _save_contact_sheet(samples, thumbnail_path: Path | None) -> None:
+    if not samples or thumbnail_path is None:
+        return
+    try:
+        from PIL import Image, ImageDraw
+
+        sheet = Image.new("RGB", (480, 112 * ((len(samples) + 2) // 3)), "#20242a")
+        draw = ImageDraw.Draw(sheet)
+        for index, (position, sample) in enumerate(samples):
+            x, y = (index % 3) * 160, (index // 3) * 112
+            sheet.paste(sample, (x + (160 - sample.width) // 2, y))
+            draw.text((x + 6, y + 92), f"{position:.0%}", fill="white")
+        sheet.save(
+            thumbnail_path.with_stem(thumbnail_path.stem + "-samples"),
+            "JPEG",
+            quality=85,
+        )
+    except OSError:
+        pass
+
+
+def _save_thumbnail(image, path: Path | None) -> None:
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        preview = image.copy().convert("RGB")
+        preview.thumbnail((520, 292))
+        preview.save(path, "JPEG", quality=80)
+    except OSError:
+        pass
+
+
 def _load_dependencies():
     try:
         import cv2
@@ -241,6 +314,7 @@ def _load_dependencies():
         raise RuntimeError(
             "Missing video fingerprint dependencies; install opencv-python, ImageHash, and Pillow."
         ) from exc
+    cv2.setNumThreads(1)
     return cv2, imagehash, Image
 
 

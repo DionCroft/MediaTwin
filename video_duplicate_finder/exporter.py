@@ -4,22 +4,54 @@ from __future__ import annotations
 
 import csv
 import json
+import os
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 from video_duplicate_finder.models import DuplicateGroup, ScanRunResult, VideoRecord
 
 
-def export_groups_to_json(groups: list[DuplicateGroup], output_path: str | Path) -> Path:
+@contextmanager
+def _report_file(output_path: str | Path, suffix: str):
+    """Replace complete reports atomically; never open a media file for writing."""
     path = Path(output_path)
+    if not path.suffix:
+        path = path.with_suffix(suffix)
+    if path.suffix.lower() != suffix or path.is_symlink():
+        raise ValueError(
+            f"Choose a regular {suffix} report path, not a media file or link."
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="",
+            dir=path.parent,
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            yield path, handle
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def export_groups_to_json(
+    groups: list[DuplicateGroup], output_path: str | Path
+) -> Path:
+    with _report_file(output_path, ".json") as (path, handle):
         json.dump([group.to_export_dict() for group in groups], handle, indent=2)
     return path
 
 
 def export_scan_report_to_json(result: ScanRunResult, output_path: str | Path) -> Path:
-    path = Path(output_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "folder": result.folder,
         "total_files": result.total_files,
@@ -27,20 +59,20 @@ def export_scan_report_to_json(result: ScanRunResult, output_path: str | Path) -
         "cancelled": result.cancelled,
         "cache_hits": result.cache_hits,
         "cache_error": result.cache_error,
-        "duplicate_groups": [group.to_export_dict() for group in result.duplicate_groups],
+        "scan_errors": result.scan_errors,
+        "duplicate_groups": [
+            group.to_export_dict() for group in result.duplicate_groups
+        ],
         "files_needing_attention": [
             _record_report_dict(record) for record in result.failed_files
         ],
     }
-    with path.open("w", encoding="utf-8") as handle:
+    with _report_file(output_path, ".json") as (path, handle):
         json.dump(payload, handle, indent=2)
     return path
 
 
 def export_groups_to_csv(groups: list[DuplicateGroup], output_path: str | Path) -> Path:
-    path = Path(output_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
     fieldnames = [
         "record_type",
         "group_id",
@@ -61,7 +93,7 @@ def export_groups_to_csv(groups: list[DuplicateGroup], output_path: str | Path) 
         "decoder_warnings",
     ]
 
-    with path.open("w", encoding="utf-8", newline="") as handle:
+    with _report_file(output_path, ".csv") as (path, handle):
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
 
@@ -73,9 +105,6 @@ def export_groups_to_csv(groups: list[DuplicateGroup], output_path: str | Path) 
 
 
 def export_scan_report_to_csv(result: ScanRunResult, output_path: str | Path) -> Path:
-    path = Path(output_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
     fieldnames = [
         "record_type",
         "group_id",
@@ -96,7 +125,7 @@ def export_scan_report_to_csv(result: ScanRunResult, output_path: str | Path) ->
         "decoder_warnings",
     ]
 
-    with path.open("w", encoding="utf-8", newline="") as handle:
+    with _report_file(output_path, ".csv") as (path, handle):
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
 

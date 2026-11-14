@@ -4,24 +4,27 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QThread
+from PySide6.QtCore import QThread, QTimer
 from PySide6.QtWidgets import (
-    QApplication,
     QFileDialog,
     QMainWindow,
     QMessageBox,
     QStackedWidget,
 )
 
-from video_duplicate_finder.app_paths import deletion_log_path, settings_file_path
+from video_duplicate_finder.app_paths import (
+    deletion_log_path,
+    settings_file_path,
+    user_data_dir,
+)
 from video_duplicate_finder.cache import ScanCache
 from video_duplicate_finder.config import ScanConfig
-from video_duplicate_finder.deletion_log import DeletionLogEntry, append_deletion_log
+from video_duplicate_finder.deletion import build_deletion_plan, RecycleResult
 from video_duplicate_finder.exporter import (
     export_scan_report_to_csv,
     export_scan_report_to_json,
 )
-from video_duplicate_finder.grouping import recommend_file_to_keep
+from video_duplicate_finder.grouping import recommend_file_to_keep, group_duplicates
 from video_duplicate_finder.gui.app_settings import (
     load_app_settings,
     save_app_settings,
@@ -41,6 +44,7 @@ from video_duplicate_finder.gui.screens.settings_screen import SettingsScreen
 from video_duplicate_finder.gui.screens.welcome_screen import WelcomeScreen
 from video_duplicate_finder.gui.styles.theme import stylesheet_for_theme
 from video_duplicate_finder.gui.workers.scan_worker import ScanWorker
+from video_duplicate_finder.gui.workers.delete_worker import DeleteWorker
 from video_duplicate_finder.models import DuplicateGroup, ScanRunResult, VideoRecord
 
 
@@ -56,6 +60,11 @@ class MainWindow(QMainWindow):
         self.worker_thread: QThread | None = None
         self.scan_worker: ScanWorker | None = None
         self._delete_return_widget = None
+        self.cleanup_queue: set[str] = set()
+        self.delete_worker: DeleteWorker | None = None
+        self.deletion_thread: QThread | None = None
+        self._closing = False
+        self._deletion_plan = None
 
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
@@ -95,8 +104,10 @@ class MainWindow(QMainWindow):
 
         self.results_screen.review_group_requested.connect(self.show_review)
         self.results_screen.review_all_duplicates_requested.connect(
-            self.show_delete_confirmation
+            self._queue_verified_copies
         )
+        self.results_screen.review_queue_requested.connect(self._review_queue)
+        self.results_screen.clear_queue_requested.connect(self._clear_queue)
         self.results_screen.review_attention_requested.connect(
             self.show_attention_review
         )
@@ -107,19 +118,22 @@ class MainWindow(QMainWindow):
         )
         self.results_screen.settings_requested.connect(self.show_settings)
 
-        self.review_screen.back_requested.connect(
-            lambda: self.stack.setCurrentWidget(self.results_screen)
-        )
+        self.review_screen.back_requested.connect(self._show_results)
         self.review_screen.delete_requested.connect(self.show_delete_confirmation)
+        self.review_screen.selection_changed.connect(self._review_selection_changed)
+        self.review_screen.keeper_changed.connect(self._keeper_changed)
 
         self.attention_review_screen.back_requested.connect(
             lambda: self.stack.setCurrentWidget(self.results_screen)
         )
-        self.attention_review_screen.delete_requested.connect(self.show_delete_confirmation)
-
-        self.delete_screen.cancelled.connect(
-            self._return_from_delete_confirmation
+        self.attention_review_screen.delete_requested.connect(
+            self.show_delete_confirmation
         )
+        self.attention_review_screen.selection_changed.connect(
+            self._attention_selection_changed
+        )
+
+        self.delete_screen.cancelled.connect(self._return_from_delete_confirmation)
         self.delete_screen.confirmed.connect(self.move_files_to_recycle_bin)
 
         self.settings_screen.saved.connect(self.save_settings)
@@ -148,15 +162,23 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(stylesheet_for_theme(self.app_settings.theme))
 
     def start_scan(self, folder: Path, config: ScanConfig) -> None:
+        if self.worker_thread is not None or self.deletion_thread is not None:
+            return
         folder = folder.expanduser()
         if not folder.exists() or not folder.is_dir():
-            QMessageBox.warning(self, "Folder not found", "Choose an existing folder to scan.")
+            QMessageBox.warning(
+                self, "Folder not found", "Choose an existing folder to scan."
+            )
             return
 
         settings = self._settings_dict()
         config.cache_path = Path(str(settings["cache_path"]))
+        config.thumbnail_dir = user_data_dir() / "thumbnails"
+        config.max_workers = self.app_settings.max_workers
+        config.file_timeout_seconds = self.app_settings.file_timeout_seconds
         self.app_settings.last_folder = str(folder)
-        save_app_settings(self.app_settings)
+        self._save_settings_safely()
+        self.cleanup_queue.clear()
 
         self.scanning_screen.reset()
         self.stack.setCurrentWidget(self.scanning_screen)
@@ -185,19 +207,25 @@ class MainWindow(QMainWindow):
             self.scan_worker.cancel()
 
     def _scan_finished(self, result: ScanRunResult) -> None:
+        if self._closing:
+            return
         self.current_result = result
         self.results_screen.set_result(result, self._result_message(result))
+        self.results_screen.set_queue(self.cleanup_queue)
         self.stack.setCurrentWidget(self.results_screen)
         if result.cache_error:
             QMessageBox.information(
                 self,
-                "Cache unavailable",
-                f"The scan completed without cache support:\n{result.cache_error}",
+                "Cache notice",
+                f"The scan completed, but some cache operations were unavailable:\n{result.cache_error}",
             )
 
     def _scan_cancelled(self, result: ScanRunResult) -> None:
+        if self._closing:
+            return
         self.current_result = result
         self.results_screen.set_result(result, self._result_message(result))
+        self.results_screen.set_queue(self.cleanup_queue)
         self.stack.setCurrentWidget(self.results_screen)
         QMessageBox.information(
             self,
@@ -206,6 +234,8 @@ class MainWindow(QMainWindow):
         )
 
     def _scan_failed(self, message: str) -> None:
+        if self._closing:
+            return
         self.stack.setCurrentWidget(self.welcome_screen)
         QMessageBox.critical(
             self,
@@ -218,6 +248,7 @@ class MainWindow(QMainWindow):
             self.worker_thread.deleteLater()
         self.scan_worker = None
         self.worker_thread = None
+        self._finish_close()
 
     def export_csv(self) -> None:
         self._export("CSV files (*.csv)", "results.csv", export_scan_report_to_csv)
@@ -242,7 +273,7 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            export_func(self.current_result, path)
+            saved_path = export_func(self.current_result, path)
         except (OSError, ValueError) as exc:
             QMessageBox.critical(
                 self,
@@ -251,23 +282,43 @@ class MainWindow(QMainWindow):
             )
             return
 
-        QMessageBox.information(self, "Export complete", f"Saved results to:\n{path}")
+        QMessageBox.information(
+            self, "Export complete", f"Saved results to:\n{saved_path}"
+        )
 
     def show_review(self, group: DuplicateGroup) -> None:
         self.current_group = group
-        self.review_screen.set_group(group)
+        self.review_screen.set_group(group, self.cleanup_queue)
         self.stack.setCurrentWidget(self.review_screen)
 
     def show_attention_review(self, records: list[VideoRecord]) -> None:
-        self.attention_review_screen.set_records(records)
+        protected = (
+            {g.recommended_keep for g in self.current_result.duplicate_groups}
+            if self.current_result
+            else set()
+        )
+        self.attention_review_screen.set_records(records, self.cleanup_queue, protected)
         self.stack.setCurrentWidget(self.attention_review_screen)
 
     def show_delete_confirmation(self, paths: list[str]) -> None:
+        if self.current_result is None:
+            return
+        paths = sorted(self.cleanup_queue or set(paths))
+        try:
+            self._deletion_plan = build_deletion_plan(
+                paths,
+                self.current_result.records,
+                self.current_result.duplicate_groups,
+                validate_files=False,
+            )
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Selection needs review", str(exc))
+            return
         self._delete_return_widget = self.stack.currentWidget()
         self.review_screen.release_previews()
-        QApplication.processEvents()
         records = self._records_for_paths(paths)
         self.delete_screen.set_files(paths, records)
+        self.delete_screen.set_keepers(self._deletion_plan.keepers)
         if self._delete_return_widget is self.results_screen:
             self.delete_screen.set_back_button_text("Back To Results")
         elif self._delete_return_widget is self.attention_review_screen:
@@ -277,97 +328,73 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.delete_screen)
 
     def _return_from_delete_confirmation(self) -> None:
+        if self.delete_worker is not None:
+            self.delete_worker.cancel()
+            self.delete_screen.cancel_button.setEnabled(False)
+            return
         if self._delete_return_widget is not None:
             self.stack.setCurrentWidget(self._delete_return_widget)
             return
         self.stack.setCurrentWidget(self.results_screen)
 
     def move_files_to_recycle_bin(self, paths: list[str]) -> None:
-        try:
-            from send2trash import send2trash
-        except ImportError:
-            QMessageBox.critical(
-                self,
-                "send2trash is missing",
-                "Install dependencies before deleting files safely.",
-            )
+        if self._deletion_plan is None or self.deletion_thread is not None:
             return
+        self.delete_screen.set_busy(True)
+        self.deletion_thread = QThread(self)
+        self.delete_worker = DeleteWorker(self._deletion_plan)
+        self.delete_worker.moveToThread(self.deletion_thread)
+        self.deletion_thread.started.connect(self.delete_worker.run)
+        self.delete_worker.progress.connect(self.delete_screen.update_progress)
+        self.delete_worker.finished.connect(self._deletion_finished)
+        self.delete_worker.failed.connect(self._deletion_failed)
+        for signal in (self.delete_worker.finished, self.delete_worker.failed):
+            signal.connect(self.delete_worker.deleteLater)
+            signal.connect(self.deletion_thread.quit)
+        self.deletion_thread.finished.connect(self._deletion_thread_finished)
+        self.deletion_thread.start()
 
-        moved: list[str] = []
-        missing: list[str] = []
-        failed: list[tuple[str, str]] = []
-        log_entries: list[DeletionLogEntry] = []
-        sizes_by_path = {
-            record.path: record.metadata.file_size for record in self._records_for_paths(paths)
-        }
-
-        for path_text in paths:
-            path = Path(path_text)
-            size = sizes_by_path.get(path_text, 0)
-            try:
-                if not path.exists():
-                    missing.append(path_text)
-                    log_entries.append(
-                        DeletionLogEntry(path=path_text, status="missing", size=size)
-                    )
-                    continue
-                send2trash(str(path))
-                moved.append(path_text)
-                log_entries.append(
-                    DeletionLogEntry(
-                        path=path_text,
-                        status="moved_to_recycle_bin",
-                        size=size,
-                    )
-                )
-            except Exception as exc:
-                failed.append((path_text, str(exc)))
-                log_entries.append(
-                    DeletionLogEntry(
-                        path=path_text,
-                        status="failed",
-                        size=size,
-                        error=str(exc),
-                    )
-                )
-
-        log_path: Path | None = None
-        if log_entries:
-            try:
-                log_path = append_deletion_log(log_entries)
-            except OSError as exc:
-                QMessageBox.warning(
-                    self,
-                    "Deletion log unavailable",
-                    f"Files were processed, but the deletion log could not be written:\n{exc}",
-                )
-
-        removed_from_results = moved + missing
-        if removed_from_results:
-            self._remove_paths_from_results(removed_from_results)
-
+    def _deletion_finished(self, result: RecycleResult) -> None:
+        self.delete_screen.set_busy(False)
+        self.delete_screen.cancel_button.setEnabled(True)
+        self._remove_paths_from_results(result.moved + result.missing)
+        self.cleanup_queue.difference_update(result.moved + result.missing)
         if self.current_result is not None:
             self.results_screen.set_result(
-                self.current_result,
-                self._result_message(self.current_result),
+                self.current_result, self._result_message(self.current_result)
             )
-
+            self.results_screen.set_queue(self.cleanup_queue)
+        if self._closing:
+            return
         self.stack.setCurrentWidget(self.results_screen)
-        message = f"Moved {len(moved)} file(s) to the Recycle Bin."
-        if missing:
-            message += f"\n{len(missing)} missing file(s) were removed from the current results."
-        if failed:
-            first_path, first_error = failed[0]
+        message = f"Moved {len(result.moved)} file(s) to the Recycle Bin."
+        if result.cancelled:
+            message += "\nCleanup stopped. Unprocessed files remain in the queue."
+        if result.missing:
             message += (
-                f"\n{len(failed)} file(s) could not be moved."
-                f"\nFirst failed file: {Path(first_path).name}"
-                f"\nReason: {first_error or 'Unknown error'}"
+                f"\n{len(result.missing)} missing files were removed from results."
             )
-            if "used by another process" in first_error.lower():
-                message += "\nClose any external video players and try again."
-        if log_path is not None:
-            message += f"\nLog: {log_path}"
-        QMessageBox.information(self, "Deletion complete", message)
+        if result.failed:
+            message += f"\n{len(result.failed)} could not be moved.\n{result.failed[0][0]}\n{result.failed[0][1]}"
+        if result.error:
+            message += f"\n{result.error}"
+        if result.log_path:
+            message += f"\nLog: {result.log_path}"
+        QMessageBox.information(self, "Cleanup finished", message)
+
+    def _deletion_failed(self, message: str) -> None:
+        self.delete_screen.set_busy(False)
+        self.delete_screen.cancel_button.setEnabled(True)
+        if not self._closing:
+            self._show_results()
+            QMessageBox.warning(self, "Cleanup unavailable", message)
+
+    def _deletion_thread_finished(self) -> None:
+        self.deletion_thread.deleteLater()
+        self.deletion_thread = None
+        self.delete_worker = None
+        self._deletion_plan = None
+        self._finish_close()
 
     def show_settings(self) -> None:
         self.settings_screen.load_settings(self._settings_dict())
@@ -382,7 +409,8 @@ class MainWindow(QMainWindow):
     def save_settings(self, values: dict[str, object]) -> None:
         values["last_folder"] = self.app_settings.last_folder
         self.app_settings = settings_from_dict(values)
-        save_app_settings(self.app_settings)
+        if not self._save_settings_safely():
+            return
         self._apply_settings_to_ui()
         self._apply_theme()
         QMessageBox.information(
@@ -392,6 +420,13 @@ class MainWindow(QMainWindow):
         )
 
     def clear_cache(self) -> None:
+        if self.worker_thread is not None or self.deletion_thread is not None:
+            QMessageBox.information(
+                self,
+                "Operation in progress",
+                "Wait for scanning or cleanup to finish before clearing the cache.",
+            )
+            return
         cache_path = Path(str(self._settings_dict()["cache_path"]))
         response = QMessageBox.question(
             self,
@@ -404,6 +439,12 @@ class MainWindow(QMainWindow):
         try:
             if cache_path.exists():
                 cache_path.unlink()
+            preview_dir = user_data_dir() / "thumbnails"
+            if preview_dir.exists():
+                for thumbnail in preview_dir.glob("*.jpg"):
+                    key = thumbnail.stem.removesuffix("-samples")
+                    if len(key) == 64 and all(c in "0123456789abcdef" for c in key):
+                        thumbnail.unlink(missing_ok=True)
         except OSError as exc:
             QMessageBox.critical(self, "Cache not cleared", str(exc))
             return
@@ -427,7 +468,14 @@ class MainWindow(QMainWindow):
 
     def _cache_size(self) -> int:
         cache_path = Path(str(self._settings_dict()["cache_path"]))
-        return ScanCache.file_size(cache_path)
+        size = ScanCache.file_size(cache_path)
+        try:
+            size += sum(
+                p.stat().st_size for p in (user_data_dir() / "thumbnails").glob("*.jpg")
+            )
+        except OSError:
+            pass
+        return size
 
     def _cache_entries(self) -> int:
         cache_path = Path(str(self._settings_dict()["cache_path"]))
@@ -445,7 +493,6 @@ class MainWindow(QMainWindow):
     def _records_for_paths(self, paths: list[str]) -> list[VideoRecord]:
         if self.current_result is None:
             return []
-        wanted = set(paths)
         records_by_path: dict[str, VideoRecord] = {}
         for record in self.current_result.records:
             records_by_path[record.path] = record
@@ -462,7 +509,9 @@ class MainWindow(QMainWindow):
 
         removed = set(paths)
         self.current_result.records = [
-            record for record in self.current_result.records if record.path not in removed
+            record
+            for record in self.current_result.records
+            if record.path not in removed
         ]
         self.current_result.failed_files = [
             record
@@ -470,23 +519,30 @@ class MainWindow(QMainWindow):
             if record.path not in removed
         ]
 
-        remaining_groups: list[DuplicateGroup] = []
+        surviving_matches = []
+        previous_keepers = {
+            g.recommended_keep for g in self.current_result.duplicate_groups
+        }
         for group in self.current_result.duplicate_groups:
-            group.files = [record for record in group.files if record.path not in removed]
-            group.matches = [
-                match
-                for match in group.matches
-                if match.path_a not in removed and match.path_b not in removed
-            ]
-            if len(group.files) < 2:
-                continue
-            if group.recommended_keep in removed:
-                group.recommended_keep = recommend_file_to_keep(group.files).path
-            remaining_groups.append(group)
-
-        self.current_result.duplicate_groups = remaining_groups
+            surviving_matches.extend(
+                [
+                    match
+                    for match in group.matches
+                    if match.path_a not in removed and match.path_b not in removed
+                ]
+            )
+        self.current_result.duplicate_groups = group_duplicates(
+            self.current_result.records, surviving_matches
+        )
+        for group in self.current_result.duplicate_groups:
+            prior = [r for r in group.files if r.path in previous_keepers]
+            if prior:
+                group.recommended_keep = recommend_file_to_keep(prior).path
+        self.current_group = None
 
     def _result_message(self, result: ScanRunResult) -> str:
+        if result.scan_errors:
+            return f"{len(result.scan_errors)} folders or files could not be accessed. See the exported report for details."
         if result.cancelled:
             return (
                 f"Scan cancelled after {result.processed_files} of "
@@ -502,3 +558,85 @@ class MainWindow(QMainWindow):
                 "unreadable, partially sampled, or decoded with warnings."
             )
         return ""
+
+    def _save_settings_safely(self) -> bool:
+        try:
+            save_app_settings(self.app_settings)
+            return True
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                "Settings not saved",
+                f"The app will use these settings for this session.\n{exc}",
+            )
+            return False
+
+    def _show_results(self) -> None:
+        self.review_screen.release_previews()
+        if self.current_result is not None:
+            self.results_screen.set_result(
+                self.current_result, self._result_message(self.current_result)
+            )
+        self.results_screen.set_queue(self.cleanup_queue)
+        self.stack.setCurrentWidget(self.results_screen)
+
+    def _queue_verified_copies(self, paths: list[str]) -> None:
+        self.cleanup_queue.update(paths)
+        self._refresh_queue_controls()
+
+    def _review_queue(self) -> None:
+        self.show_delete_confirmation(sorted(self.cleanup_queue))
+
+    def _clear_queue(self) -> None:
+        self.cleanup_queue.clear()
+        self._refresh_queue_controls()
+
+    def _update_queue(self, paths: list[str], records: list[VideoRecord]) -> None:
+        self.cleanup_queue.difference_update(record.path for record in records)
+        self.cleanup_queue.update(paths)
+        self._refresh_queue_controls()
+
+    def _refresh_queue_controls(self) -> None:
+        self.results_screen.set_queue(self.cleanup_queue)
+        self.review_screen.delete_button.setEnabled(bool(self.cleanup_queue))
+        self.attention_review_screen.delete_button.setEnabled(bool(self.cleanup_queue))
+
+    def _review_selection_changed(self, paths: list[str]) -> None:
+        if self.current_group is not None:
+            self._update_queue(paths, self.current_group.files)
+
+    def _attention_selection_changed(self, paths: list[str]) -> None:
+        self._update_queue(paths, self.attention_review_screen.records)
+
+    def _keeper_changed(self, group: DuplicateGroup) -> None:
+        self.cleanup_queue.discard(group.recommended_keep)
+        self._refresh_queue_controls()
+
+    def closeEvent(self, event) -> None:
+        if self.worker_thread is None and self.deletion_thread is None:
+            self.review_screen.release_previews()
+            event.accept()
+            return
+        event.ignore()
+        if self._closing:
+            return
+        response = QMessageBox.question(
+            self,
+            "Operation in progress",
+            "Stop after the current operation and close?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if response == QMessageBox.StandardButton.Yes:
+            self._closing = True
+            self.cancel_scan()
+            if self.delete_worker is not None:
+                self.delete_worker.cancel()
+
+    def _finish_close(self) -> None:
+        if (
+            self._closing
+            and self.worker_thread is None
+            and self.deletion_thread is None
+        ):
+            QTimer.singleShot(0, self.close)

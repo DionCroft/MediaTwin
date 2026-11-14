@@ -1,11 +1,12 @@
 """Application theme stylesheets."""
 
 from __future__ import annotations
+from pathlib import Path
+import sys
 
 
 LIGHT_THEME = """
 QWidget {
-    background: #f5f7fb;
     color: #17202a;
     font-family: "Segoe UI";
     font-size: 10.5pt;
@@ -79,6 +80,13 @@ QPushButton {
 QPushButton:hover {
     background: #edf2fb;
 }
+QToolButton, QMenu {
+    background: #ffffff;
+    border: 1px solid #cfd7e6;
+    border-radius: 6px;
+    padding: 6px;
+}
+QMenu::item:selected { background: #dbeafe; color: #17202a; }
 QPushButton:disabled {
     color: #8a94a6;
     background: #eef1f6;
@@ -101,6 +109,11 @@ QPushButton#dangerButton {
 QPushButton#dangerButton:hover {
     background: #b91c1c;
 }
+QPushButton#primaryButton:disabled, QPushButton#dangerButton:disabled {
+    background: #eef1f6;
+    border-color: #cfd7e6;
+    color: #697586;
+}
 QCheckBox {
     spacing: 10px;
     padding: 8px 4px;
@@ -116,6 +129,7 @@ QCheckBox::indicator:hover {
     border-color: #2563eb;
 }
 QCheckBox::indicator:checked {
+    image: url("__CHECKMARK__");
     background: #2563eb;
     border-color: #1d4ed8;
 }
@@ -128,7 +142,10 @@ QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTableWidget, QListWidget {
 QTableWidget {
     gridline-color: #e5e9f2;
     selection-background-color: #dbeafe;
+    selection-color: #17202a;
+    alternate-background-color: #f7f9fc;
 }
+QTableCornerButton::section { background: #eef1f6; border: 0; }
 QScrollArea {
     border: 0;
     background: transparent;
@@ -156,7 +173,6 @@ QProgressBar::chunk {
 
 DARK_THEME = """
 QWidget {
-    background: #111827;
     color: #f9fafb;
     font-family: "Segoe UI";
     font-size: 10.5pt;
@@ -230,6 +246,13 @@ QPushButton {
 QPushButton:hover {
     background: #263244;
 }
+QToolButton, QMenu {
+    background: #1f2937;
+    border: 1px solid #4b5563;
+    border-radius: 6px;
+    padding: 6px;
+}
+QMenu::item:selected { background: #1e40af; color: #f9fafb; }
 QPushButton:disabled {
     color: #6b7280;
     background: #1b2330;
@@ -252,6 +275,11 @@ QPushButton#dangerButton {
 QPushButton#dangerButton:hover {
     background: #b91c1c;
 }
+QPushButton#primaryButton:disabled, QPushButton#dangerButton:disabled {
+    background: #1b2330;
+    border-color: #374151;
+    color: #9ca3af;
+}
 QCheckBox {
     spacing: 10px;
     padding: 8px 4px;
@@ -267,6 +295,7 @@ QCheckBox::indicator:hover {
     border-color: #60a5fa;
 }
 QCheckBox::indicator:checked {
+    image: url("__CHECKMARK__");
     background: #60a5fa;
     border-color: #93c5fd;
 }
@@ -280,7 +309,10 @@ QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTableWidget, QListWidget {
 QTableWidget {
     gridline-color: #374151;
     selection-background-color: #1e40af;
+    selection-color: #f9fafb;
+    alternate-background-color: #263244;
 }
+QTableCornerButton::section { background: #263244; border: 0; }
 QScrollArea {
     border: 0;
     background: transparent;
@@ -307,6 +339,7 @@ QProgressBar::chunk {
 
 
 def stylesheet_for_theme(theme_name: str | None) -> str:
-    if (theme_name or "").lower() == "dark":
-        return DARK_THEME
-    return LIGHT_THEME
+    root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[3]))
+    checkmark = (root / "assets" / "checkmark.svg").as_posix()
+    theme = DARK_THEME if (theme_name or "").lower() == "dark" else LIGHT_THEME
+    return theme.replace("__CHECKMARK__", checkmark)

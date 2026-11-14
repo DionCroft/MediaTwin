@@ -58,7 +58,6 @@ class WelcomeScreen(QWidget):
         self.advanced_toggle.clicked.connect(self._toggle_advanced)
 
         self.advanced_panel = QFrame()
-        self.advanced_panel.setObjectName("card")
         self.advanced_panel.setVisible(False)
         advanced_layout = QVBoxLayout(self.advanced_panel)
         advanced_layout.setSpacing(10)
@@ -77,7 +76,9 @@ class WelcomeScreen(QWidget):
         self.minimum_frames_input.setRange(1, 6)
         self.minimum_frames_input.setValue(4)
 
-        advanced_layout.addWidget(labeled_widget("Similarity threshold", self.threshold_input))
+        advanced_layout.addWidget(
+            labeled_widget("Similarity threshold", self.threshold_input)
+        )
         advanced_layout.addWidget(
             labeled_widget("Frame hash distance threshold", self.frame_distance_input)
         )
@@ -100,7 +101,6 @@ class WelcomeScreen(QWidget):
         secondary_row.addStretch(1)
 
         card = QFrame()
-        card.setObjectName("card")
         card_layout = QVBoxLayout(card)
         card_layout.setSpacing(16)
         card_layout.addLayout(folder_row)
@@ -120,7 +120,9 @@ class WelcomeScreen(QWidget):
         layout.addStretch(1)
 
     def apply_settings(self, settings: dict[str, object]) -> None:
-        self.recursive_checkbox.setChecked(bool(settings.get("recursive_default", False)))
+        self.recursive_checkbox.setChecked(
+            bool(settings.get("recursive_default", False))
+        )
         self.threshold_input.setValue(float(settings.get("similarity_threshold", 0.85)))
         self.frame_distance_input.setValue(int(settings.get("frame_distance", 10)))
         self.minimum_frames_input.setValue(int(settings.get("min_matching_frames", 4)))

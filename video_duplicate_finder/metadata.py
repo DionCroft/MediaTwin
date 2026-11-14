@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import math
 from pathlib import Path
 from typing import Any
 
@@ -34,12 +35,16 @@ def extract_metadata(media_path: str | Path) -> VideoMetadata:
 
     if media_type in {"image", "gif"}:
         stream_data = _metadata_from_pillow(path, media_type)
-        unavailable_message = "Image metadata unavailable; install Pillow or check the file."
+        unavailable_message = (
+            "Image metadata unavailable; install Pillow or check the file."
+        )
     else:
         stream_data = _metadata_from_ffprobe(path)
         if not stream_data:
             stream_data = _metadata_from_opencv(path)
-        unavailable_message = "Metadata unavailable; install ffmpeg/ffprobe or opencv-python."
+        unavailable_message = (
+            "Metadata unavailable; install ffmpeg/ffprobe or opencv-python."
+        )
 
     error = None
     if not stream_data:
@@ -112,6 +117,9 @@ def _metadata_from_ffprobe(path: Path) -> dict[str, Any]:
             text=True,
             timeout=20,
             check=False,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         return {}
@@ -127,7 +135,9 @@ def _metadata_from_ffprobe(path: Path) -> dict[str, Any]:
     streams = payload.get("streams") or []
     stream = streams[0] if streams else {}
     video_format = payload.get("format") or {}
-    duration = _to_float(video_format.get("duration")) or _to_float(stream.get("duration"))
+    duration = _to_float(video_format.get("duration")) or _to_float(
+        stream.get("duration")
+    )
 
     return {
         "duration": duration,
@@ -178,7 +188,7 @@ def _to_float(value: Any) -> float | None:
         result = float(value)
     except (TypeError, ValueError):
         return None
-    return result if result >= 0 else None
+    return result if math.isfinite(result) and result >= 0 else None
 
 
 def _to_int(value: Any) -> int | None:

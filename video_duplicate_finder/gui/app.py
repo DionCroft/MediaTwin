@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import sys
+import multiprocessing
 from pathlib import Path
 
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
-
-from video_duplicate_finder.gui.main_window import MainWindow
 
 
 APP_USER_MODEL_ID = "DionCroft.VideoDuplicateFinder.Desktop"
@@ -34,6 +33,8 @@ def _set_windows_app_user_model_id() -> None:
 
 
 def main() -> int:
+    from video_duplicate_finder.gui.main_window import MainWindow
+
     _set_windows_app_user_model_id()
     app = QApplication(sys.argv)
     app.setApplicationName("Media Duplicate Finder")
@@ -53,4 +54,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     raise SystemExit(main())

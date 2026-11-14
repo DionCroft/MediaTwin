@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QVBoxLayout,
     QWidget,
+    QScrollArea,
 )
 
 from video_duplicate_finder.gui.formatting import format_file_size
@@ -33,10 +34,9 @@ class SettingsScreen(QWidget):
         super().__init__(parent)
 
         title = QLabel("Settings")
-        title.setObjectName("heroTitle")
+        title.setObjectName("sectionTitle")
 
         panel = QFrame()
-        panel.setObjectName("card")
         panel_layout = QVBoxLayout(panel)
         panel_layout.setSpacing(12)
 
@@ -52,6 +52,14 @@ class SettingsScreen(QWidget):
 
         self.minimum_frames_input = QSpinBox()
         self.minimum_frames_input.setRange(1, 6)
+        self.workers_input = QSpinBox()
+        self.workers_input.setRange(1, 8)
+        self.workers_input.setToolTip(
+            "Use fewer workers for slow disks or network shares"
+        )
+        self.timeout_input = QSpinBox()
+        self.timeout_input.setRange(10, 600)
+        self.timeout_input.setSuffix(" s")
 
         self.export_location_input = QLineEdit()
         export_browse = QPushButton("Browse")
@@ -73,7 +81,9 @@ class SettingsScreen(QWidget):
         clear_cache_button = QPushButton("Clear Cache")
         clear_cache_button.clicked.connect(self.clear_cache_requested.emit)
 
-        panel_layout.addWidget(labeled_widget("Similarity threshold", self.threshold_input))
+        panel_layout.addWidget(
+            labeled_widget("Similarity threshold", self.threshold_input)
+        )
         panel_layout.addWidget(self.recursive_default)
         panel_layout.addWidget(
             labeled_widget("Frame hash distance threshold", self.frame_distance_input)
@@ -82,9 +92,13 @@ class SettingsScreen(QWidget):
             labeled_widget("Minimum matching frames", self.minimum_frames_input)
         )
         panel_layout.addWidget(QLabel("Default export location"))
+        panel_layout.addWidget(labeled_widget("Parallel decoders", self.workers_input))
+        panel_layout.addWidget(labeled_widget("Per-file timeout", self.timeout_input))
         panel_layout.addLayout(export_row)
         panel_layout.addWidget(labeled_widget("Theme", self.theme_combo))
-        panel_layout.addWidget(labeled_widget("Cache database path", self.cache_path_input))
+        panel_layout.addWidget(
+            labeled_widget("Cache database path", self.cache_path_input)
+        )
         panel_layout.addWidget(self.cache_size_label)
         panel_layout.addWidget(self.cache_entries_label)
         panel_layout.addWidget(self.settings_file_label)
@@ -106,19 +120,28 @@ class SettingsScreen(QWidget):
         layout.setContentsMargins(46, 42, 46, 42)
         layout.setSpacing(16)
         layout.addWidget(title)
-        layout.addWidget(panel)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(panel)
+        layout.addWidget(scroll, 1)
         layout.addLayout(button_row)
         layout.addStretch(1)
 
     def load_settings(self, settings: dict[str, object]) -> None:
         self.threshold_input.setValue(float(settings.get("similarity_threshold", 0.85)))
-        self.recursive_default.setChecked(bool(settings.get("recursive_default", False)))
+        self.recursive_default.setChecked(
+            bool(settings.get("recursive_default", False))
+        )
         self.frame_distance_input.setValue(int(settings.get("frame_distance", 10)))
         self.minimum_frames_input.setValue(int(settings.get("min_matching_frames", 4)))
+        self.workers_input.setValue(int(settings.get("max_workers", 2)))
+        self.timeout_input.setValue(int(settings.get("file_timeout_seconds", 90)))
         self.export_location_input.setText(str(settings.get("export_location", "")))
         self.cache_path_input.setText(str(settings.get("cache_path", "")))
         theme = str(settings.get("theme", "Light"))
-        self.theme_combo.setCurrentText(theme if theme in {"Light", "Dark"} else "Light")
+        self.theme_combo.setCurrentText(
+            theme if theme in {"Light", "Dark"} else "Light"
+        )
 
     def set_storage_info(
         self,
@@ -136,7 +159,9 @@ class SettingsScreen(QWidget):
         if deletion_log.exists():
             self.deletion_log_label.setText(f"Deletion log: {deletion_log}")
         else:
-            self.deletion_log_label.setText(f"Deletion log: {deletion_log} (not created yet)")
+            self.deletion_log_label.setText(
+                f"Deletion log: {deletion_log} (not created yet)"
+            )
 
     def _browse_export_location(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select export folder")
@@ -153,5 +178,7 @@ class SettingsScreen(QWidget):
                 "export_location": self.export_location_input.text().strip(),
                 "theme": self.theme_combo.currentText(),
                 "cache_path": self.cache_path_input.text().strip(),
+                "max_workers": self.workers_input.value(),
+                "file_timeout_seconds": self.timeout_input.value(),
             }
         )

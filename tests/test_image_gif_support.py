@@ -110,6 +110,28 @@ def test_metadata_from_dict_ignores_unknown_cache_fields() -> None:
     assert metadata.path == "legacy.mp4"
 
 
+def test_different_solid_colors_are_not_duplicates(tmp_path: Path) -> None:
+    records = []
+    for color in ("red", "blue"):
+        path = tmp_path / f"{color}.png"
+        Image.new("RGB", (32, 32), color).save(path)
+        metadata = extract_metadata(path)
+        records.append(VideoRecord(metadata, generate_fingerprint(path, metadata)))
+    assert records[0].fingerprint.frame_hashes == records[1].fingerprint.frame_hashes
+    assert not find_duplicate_pairs(records, ScanConfig())
+
+
+def test_gif_contact_sheet_is_created(tmp_path: Path) -> None:
+    from video_duplicate_finder.pipeline import _process_media
+
+    path = tmp_path / "animated.gif"
+    images = [Image.new("RGB", (32, 32), color) for color in ("red", "green", "blue")]
+    images[0].save(path, save_all=True, append_images=images[1:], duration=100)
+    record = _process_media(path, ScanConfig(thumbnail_dir=tmp_path / "previews"))
+    assert record.fingerprint.contact_sheet_path
+    assert Path(record.fingerprint.contact_sheet_path).is_file()
+
+
 def _record(path: str, media_type: str, hashes: list[str]) -> VideoRecord:
     return VideoRecord(
         metadata=VideoMetadata(

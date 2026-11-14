@@ -53,6 +53,9 @@ class VideoFingerprint:
     hash_algorithm: str = "phash"
     hash_size: int = 8
     decoder_warnings: list[str] = field(default_factory=list)
+    thumbnail_path: str | None = None
+    contact_sheet_path: str | None = None
+    color_hash: str | None = None
 
     @property
     def is_usable(self) -> bool:
@@ -76,6 +79,9 @@ class VideoFingerprint:
             "hash_algorithm",
             "hash_size",
             "decoder_warnings",
+            "thumbnail_path",
+            "contact_sheet_path",
+            "color_hash",
         }
         return cls(**{key: value for key, value in data.items() if key in known_fields})
 
@@ -128,6 +134,19 @@ class DuplicateGroup:
     files: list[VideoRecord]
     matches: list[MatchResult] = field(default_factory=list)
 
+    @property
+    def requires_manual_review(self) -> bool:
+        direct = {
+            m.path_b if m.path_a == self.recommended_keep else m.path_a
+            for m in self.matches
+            if self.recommended_keep in (m.path_a, m.path_b)
+        }
+        return any(
+            r.needs_attention
+            or (r.path != self.recommended_keep and r.path not in direct)
+            for r in self.files
+        )
+
     def to_export_dict(self) -> dict[str, Any]:
         return {
             "group_id": self.group_id,
@@ -136,6 +155,7 @@ class DuplicateGroup:
             "candidate_paths": [record.path for record in self.files],
             "files": [_record_export_dict(record) for record in self.files],
             "matches": [match.to_dict() for match in self.matches],
+            "requires_manual_review": self.requires_manual_review,
         }
 
 
@@ -163,3 +183,18 @@ class ScanRunResult:
     cache_error: str | None = None
     processed_files: int = 0
     cancelled: bool = False
+    scan_errors: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ScanProgress:
+    stage: str
+    processed: int = 0
+    total: int = 0
+    current_path: str = ""
+    cache_hits: int = 0
+    attention_count: int = 0
+    comparisons: int = 0
+    matches: int = 0
+    elapsed: float = 0.0
+    thumbnail_path: str | None = None

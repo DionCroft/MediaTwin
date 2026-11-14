@@ -7,6 +7,8 @@ from pathlib import Path
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QLineEdit,
+    QMenu,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -16,9 +18,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from video_duplicate_finder.gui.formatting import format_file_size, potential_space_saved
+from video_duplicate_finder.gui.formatting import (
+    format_file_size,
+    potential_space_saved,
+)
 from video_duplicate_finder.gui.widgets.duplicate_group_card import DuplicateGroupCard
 from video_duplicate_finder.models import DuplicateGroup, ScanRunResult
+from video_duplicate_finder.grouping import safe_cleanup_candidates
 
 
 class ResultsScreen(QWidget):
@@ -29,6 +35,8 @@ class ResultsScreen(QWidget):
     export_json_requested = Signal()
     scan_again_requested = Signal()
     settings_requested = Signal()
+    review_queue_requested = Signal()
+    clear_queue_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -36,9 +44,11 @@ class ResultsScreen(QWidget):
         self.cards: dict[str, DuplicateGroupCard] = {}
         self.selected_group_id: str | None = None
         self.status_message = ""
+        self.page = 0
+        self.page_size = 30
 
         title = QLabel("Duplicate Results")
-        title.setObjectName("heroTitle")
+        title.setObjectName("sectionTitle")
         self.summary_label = QLabel("No scan results yet.")
         self.summary_label.setObjectName("mutedLabel")
         self.summary_label.setWordWrap(True)
@@ -65,18 +75,27 @@ class ResultsScreen(QWidget):
             ]
         )
         self.sort_combo.currentIndexChanged.connect(self._refresh_cards)
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search filename or folder")
+        self.search_input.textChanged.connect(self._filter_changed)
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(["All media", "Videos", "Images", "GIFs"])
+        self.type_combo.currentIndexChanged.connect(self._filter_changed)
 
         controls = QHBoxLayout()
         controls.addWidget(self.filter_combo)
         controls.addWidget(self.sort_combo)
-        controls.addStretch(1)
+        controls.addWidget(self.type_combo)
+        controls.addWidget(self.search_input, 1)
 
         self.export_csv_button = QPushButton("Export CSV")
         self.export_json_button = QPushButton("Export JSON")
-        self.review_all_button = QPushButton("Review All Duplicate Copies")
-        self.review_all_button.setObjectName("dangerButton")
+        self.review_all_button = QPushButton("Queue verified copies")
+        self.review_all_button.setToolTip(
+            "Healthy copies with a direct visual match of at least 95% to a protected keeper"
+        )
         self.review_all_button.setEnabled(False)
-        self.review_button = QPushButton("Review Selected Group")
+        self.review_button = QPushButton("Review group")
         self.review_button.setObjectName("primaryButton")
         self.review_button.setEnabled(False)
         self.scan_again_button = QPushButton("New Scan")
@@ -90,8 +109,12 @@ class ResultsScreen(QWidget):
         self.settings_button.clicked.connect(self.settings_requested.emit)
 
         action_row = QHBoxLayout()
-        action_row.addWidget(self.export_csv_button)
-        action_row.addWidget(self.export_json_button)
+        export_button = QPushButton("Export report")
+        export_menu = QMenu(export_button)
+        export_menu.addAction("CSV report", self.export_csv_requested.emit)
+        export_menu.addAction("JSON report", self.export_json_requested.emit)
+        export_button.setMenu(export_menu)
+        action_row.addWidget(export_button)
         action_row.addStretch(1)
         action_row.addWidget(self.scan_again_button)
         action_row.addWidget(self.settings_button)
@@ -106,6 +129,28 @@ class ResultsScreen(QWidget):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setWidget(self.card_container)
+        self.page_label = QLabel()
+        self.previous_button = QPushButton("Previous")
+        self.next_button = QPushButton("Next")
+        self.previous_button.clicked.connect(lambda: self._change_page(-1))
+        self.next_button.clicked.connect(lambda: self._change_page(1))
+        paging = QHBoxLayout()
+        paging.addWidget(self.page_label)
+        paging.addStretch(1)
+        paging.addWidget(self.previous_button)
+        paging.addWidget(self.next_button)
+        self.queue_label = QLabel("Cleanup queue is empty")
+        self.queue_label.setWordWrap(True)
+        self.queue_button = QPushButton("Review cleanup queue")
+        self.queue_button.setObjectName("primaryButton")
+        self.queue_button.setEnabled(False)
+        self.queue_button.clicked.connect(self.review_queue_requested.emit)
+        self.clear_queue_button = QPushButton("Clear queue")
+        self.clear_queue_button.clicked.connect(self.clear_queue_requested.emit)
+        queue_row = QHBoxLayout()
+        queue_row.addWidget(self.queue_label, 1)
+        queue_row.addWidget(self.clear_queue_button)
+        queue_row.addWidget(self.queue_button)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(34, 28, 34, 28)
@@ -115,15 +160,35 @@ class ResultsScreen(QWidget):
         layout.addWidget(self.status_label)
         layout.addLayout(controls)
         layout.addWidget(scroll_area, 1)
+        layout.addLayout(paging)
+        layout.addLayout(queue_row)
         layout.addLayout(action_row)
 
     def set_result(self, result: ScanRunResult, status_message: str = "") -> None:
         self.result = result
         self.status_message = status_message
         self.selected_group_id = None
+        self.page = 0
         self._update_summary()
         self._refresh_cards()
         self.review_all_button.setEnabled(bool(self._all_non_recommended_paths()))
+
+    def set_queue(self, paths: set[str]) -> None:
+        records = self.result.records if self.result else []
+        size = sum(r.metadata.file_size for r in records if r.path in paths)
+        self.queue_label.setText(
+            f"Cleanup queue: {len(paths)} files | {format_file_size(size)}"
+        )
+        self.queue_button.setEnabled(bool(paths))
+        self.clear_queue_button.setEnabled(bool(paths))
+
+    def _filter_changed(self, *args) -> None:
+        self.page = 0
+        self._refresh_cards()
+
+    def _change_page(self, delta: int) -> None:
+        self.page += delta
+        self._refresh_cards()
 
     def _update_summary(self) -> None:
         if self.result is None:
@@ -155,6 +220,13 @@ class ResultsScreen(QWidget):
                 widget.deleteLater()
 
         groups = self._visible_groups()
+        count = len(groups)
+        pages = max(1, (count + self.page_size - 1) // self.page_size)
+        self.page = min(max(self.page, 0), pages - 1)
+        groups = groups[self.page * self.page_size : (self.page + 1) * self.page_size]
+        self.page_label.setText(f"{count} groups | Page {self.page + 1} of {pages}")
+        self.previous_button.setEnabled(self.page > 0)
+        self.next_button.setEnabled(self.page + 1 < pages)
         visible_group_ids = {group.group_id for group in groups}
         if self.selected_group_id not in visible_group_ids:
             self.selected_group_id = None
@@ -181,17 +253,40 @@ class ResultsScreen(QWidget):
 
         self.card_layout.addStretch(1)
         self.review_button.setEnabled(self.selected_group_id is not None)
+        self.review_all_button.setEnabled(bool(self._all_non_recommended_paths()))
 
     def _visible_groups(self) -> list[DuplicateGroup]:
         if self.result is None:
             return []
 
         groups = list(self.result.duplicate_groups)
+        query = self.search_input.text().strip().casefold()
+        if query:
+            groups = [
+                g for g in groups if any(query in r.path.casefold() for r in g.files)
+            ]
+        media_type = {1: "video", 2: "image", 3: "gif"}.get(
+            self.type_combo.currentIndex()
+        )
+        if media_type:
+            groups = [
+                g
+                for g in groups
+                if any(r.metadata.media_type == media_type for r in g.files)
+            ]
         filter_text = self.filter_combo.currentText()
         if filter_text.startswith("High-confidence"):
-            groups = [group for group in groups if group.similarity_score >= 0.95]
+            groups = [
+                group
+                for group in groups
+                if group.similarity_score >= 0.95 and not group.requires_manual_review
+            ]
         elif filter_text.startswith("Lower-confidence"):
-            groups = [group for group in groups if group.similarity_score < 0.95]
+            groups = [
+                group
+                for group in groups
+                if group.similarity_score < 0.95 or group.requires_manual_review
+            ]
 
         sort_text = self.sort_combo.currentText()
         if sort_text == "Highest similarity":
@@ -239,7 +334,9 @@ class ResultsScreen(QWidget):
             "whether to move anything to the Recycle Bin."
         )
         intro.setWordWrap(True)
-        total_size = sum(record.metadata.file_size for record in self.result.failed_files)
+        total_size = sum(
+            record.metadata.file_size for record in self.result.failed_files
+        )
         summary = QLabel(
             f"{len(self.result.failed_files)} file(s), {format_file_size(total_size)} total."
         )
@@ -252,7 +349,9 @@ class ResultsScreen(QWidget):
         layout.addWidget(summary)
 
         for record in self.result.failed_files[:12]:
-            warning = record.metadata.error or record.fingerprint.error or "Decoder warning"
+            warning = (
+                record.metadata.error or record.fingerprint.error or "Decoder warning"
+            )
             if record.fingerprint.decoder_warnings:
                 warning = record.fingerprint.decoder_warnings[0]
             label = QLabel(f"{Path(record.path).name}\n{warning}")
@@ -262,7 +361,9 @@ class ResultsScreen(QWidget):
 
         remaining = len(self.result.failed_files) - 12
         if remaining > 0:
-            more = QLabel(f"...and {remaining} more. Export a report for the full list.")
+            more = QLabel(
+                f"...and {remaining} more. Export a report for the full list."
+            )
             more.setObjectName("mutedLabel")
             layout.addWidget(more)
 
@@ -300,15 +401,9 @@ class ResultsScreen(QWidget):
         if self.result is None:
             return []
 
-        paths: list[str] = []
-        seen: set[str] = set()
-        recommended_paths = {
-            group.recommended_keep for group in self.result.duplicate_groups
-        }
-        for group in self.result.duplicate_groups:
-            for record in group.files:
-                if record.path in recommended_paths or record.path in seen:
-                    continue
-                paths.append(record.path)
-                seen.add(record.path)
-        return paths
+        protected = {g.recommended_keep for g in self.result.duplicate_groups}
+        return [
+            p
+            for p in safe_cleanup_candidates(self._visible_groups())
+            if p not in protected
+        ]

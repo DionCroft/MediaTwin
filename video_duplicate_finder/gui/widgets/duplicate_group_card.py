@@ -5,9 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QVBoxLayout
 
-from video_duplicate_finder.gui.formatting import format_file_size, potential_space_saved
+from video_duplicate_finder.gui.formatting import (
+    format_file_size,
+    potential_space_saved,
+)
 from video_duplicate_finder.models import DuplicateGroup
 
 
@@ -23,7 +27,8 @@ class DuplicateGroupCard(QFrame):
 
         title = QLabel(group.group_id.replace("-", " ").title())
         title.setObjectName("sectionTitle")
-        score = QLabel(f"{group.similarity_score:.1%} similarity")
+        confidence = "Manual review" if group.requires_manual_review else "Visual match"
+        score = QLabel(f"{confidence} | {group.similarity_score:.1%} hash similarity")
         score.setObjectName("mutedLabel")
 
         keep_name = Path(group.recommended_keep).name
@@ -50,6 +55,23 @@ class DuplicateGroupCard(QFrame):
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
+        keeper = next(
+            (r for r in group.files if r.path == group.recommended_keep), None
+        )
+        if keeper and keeper.fingerprint.thumbnail_path:
+            thumbnail = QLabel()
+            thumbnail.setFixedSize(160, 90)
+            pixmap = QPixmap(keeper.fingerprint.thumbnail_path)
+            if not pixmap.isNull():
+                thumbnail.setPixmap(
+                    pixmap.scaled(
+                        160,
+                        90,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
+            layout.addWidget(thumbnail)
         layout.addWidget(title)
         layout.addWidget(score)
         layout.addWidget(keep_label)

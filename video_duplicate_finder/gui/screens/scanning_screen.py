@@ -16,7 +16,9 @@ class ScanningScreen(QWidget):
 
         title = QLabel("Scanning Media")
         title.setObjectName("heroTitle")
-        subtitle = QLabel("Analysing visual fingerprints. You can cancel safely at any time.")
+        subtitle = QLabel(
+            "Analysing visual fingerprints. You can cancel safely at any time."
+        )
         subtitle.setObjectName("mutedLabel")
 
         self.progress_panel = ProgressPanel()
@@ -40,19 +42,8 @@ class ScanningScreen(QWidget):
     def set_media_count(self, total: int) -> None:
         self.progress_panel.set_media_count(total)
 
-    def update_progress(
-        self,
-        processed: int,
-        total: int,
-        current_file: str,
-        duplicate_groups: int,
-    ) -> None:
-        self.progress_panel.update_progress(
-            processed,
-            total,
-            current_file,
-            duplicate_groups,
-        )
+    def update_progress(self, event) -> None:
+        self.progress_panel.set_event(event)
 
     def _cancel(self) -> None:
         self.cancel_button.setEnabled(False)

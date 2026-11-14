@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFormLayout, QGroupBox, QLabel
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QFormLayout, QGroupBox, QLabel, QSizePolicy
 
 from video_duplicate_finder.gui.formatting import (
     format_duration,
@@ -35,6 +36,11 @@ class MetadataPanel(QGroupBox):
         ):
             value = QLabel("None selected")
             value.setWordWrap(True)
+            value.setTextFormat(Qt.TextFormat.PlainText)
+            value.setMinimumWidth(0)
+            value.setSizePolicy(
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+            )
             self.labels[key] = value
             layout.addRow(label, value)
 
@@ -57,6 +63,8 @@ class MetadataPanel(QGroupBox):
         self.labels["modified"].setText(format_modified_time(metadata.modified_time))
         self.labels["scan_status"].setText(record.fingerprint.status)
         if record.fingerprint.decoder_warnings:
-            self.labels["warnings"].setText("\n".join(record.fingerprint.decoder_warnings[:4]))
+            self.labels["warnings"].setText(
+                "\n".join(record.fingerprint.decoder_warnings[:4])
+            )
         else:
             self.labels["warnings"].setText("None")
